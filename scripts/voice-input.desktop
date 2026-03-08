@@ -1,0 +1,12 @@
+[Desktop Entry]
+Version=1.0
+Name=Voice Input
+Name[zh_CN]=语音输入
+Comment=Voice-to-text input tool
+Comment[zh_CN]=语音转文字输入工具
+Exec=/home/lfh/projects/daily/voice-input/scripts/voice-input.sh
+Icon=audio-input-microphone
+Terminal=true
+Type=Application
+Categories=Utility;Accessibility;
+Keywords=voice;speech;input;microphone;
