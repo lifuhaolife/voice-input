@@ -1,16 +1,47 @@
-"""Hotkey listener module."""
+"""Hotkey listener module with Wayland support via evdev."""
 
 import logging
+import os
 import threading
 from typing import Callable
 
-from pynput import keyboard
-
 logger = logging.getLogger(__name__)
+
+# Try to import evdev for Wayland/native Linux support
+try:
+    import evdev
+    from evdev import InputDevice, categorize, ecodes
+    EVDEV_AVAILABLE = True
+except ImportError:
+    EVDEV_AVAILABLE = False
 
 
 class HotkeyListener:
-    """Global hotkey listener supporting hold and toggle modes."""
+    """Global hotkey listener using evdev for Linux/Wayland support."""
+
+    # Key name to evdev code mapping
+    KEY_MAP = {
+        "alt": ecodes.KEY_LEFTALT,
+        "alt_l": ecodes.KEY_LEFTALT,
+        "alt_r": ecodes.KEY_RIGHTALT,
+        "ctrl": ecodes.KEY_LEFTCTRL,
+        "ctrl_l": ecodes.KEY_LEFTCTRL,
+        "ctrl_r": ecodes.KEY_RIGHTCTRL,
+        "shift": ecodes.KEY_LEFTSHIFT,
+        "shift_l": ecodes.KEY_LEFTSHIFT,
+        "shift_r": ecodes.KEY_RIGHTSHIFT,
+        "super": ecodes.KEY_LEFTMETA,
+        "cmd": ecodes.KEY_LEFTMETA,
+        "win": ecodes.KEY_LEFTMETA,
+        "meta": ecodes.KEY_LEFTMETA,
+    }
+
+    # Alias mapping: alias -> list of key codes
+    KEY_ALIASES = {
+        "alt": [ecodes.KEY_LEFTALT, ecodes.KEY_RIGHTALT],
+        "ctrl": [ecodes.KEY_LEFTCTRL, ecodes.KEY_RIGHTCTRL],
+        "shift": [ecodes.KEY_LEFTSHIFT, ecodes.KEY_RIGHTSHIFT],
+    }
 
     def __init__(
         self,
@@ -22,10 +53,10 @@ class HotkeyListener:
         """Initialize hotkey listener.
 
         Args:
-            hotkey: Hotkey combination string (e.g., "ctrl+alt+v").
-            on_press: Callback when hotkey is pressed (or toggled on).
+            hotkey: Hotkey combination string (e.g., "alt", "ctrl+alt+v").
+            on_press: Callback when hotkey is pressed.
             on_release: Callback when hotkey is released (hold mode only).
-            mode: "hold" (press-hold-release) or "toggle" (press to start/stop).
+            mode: "hold" or "toggle".
         """
         self.hotkey_str = hotkey
         self.on_press = on_press
@@ -33,117 +64,191 @@ class HotkeyListener:
         self.mode = mode
 
         self._is_active = False
-        self._listener: keyboard.Listener | None = None
-        self._pressed_keys: set[keyboard.Key | keyboard.KeyCode] = set()
-        self._hotkey_keys: list[keyboard.Key | keyboard.KeyCode] = []
         self._toggle_state = False
+        self._running = False
+        self._thread: threading.Thread | None = None
+        self._pressed_keys: set[int] = set()
+        self._hotkey_codes: list[int | list[int]] = []
+        self._devices: list[InputDevice] = []
 
         self._parse_hotkey()
 
     def _parse_hotkey(self) -> None:
-        """Parse hotkey string into key codes."""
-        from pynput.keyboard import Key, KeyCode
-
-        key_map = {
-            "ctrl": Key.ctrl,
-            "ctrl_l": Key.ctrl_l,
-            "ctrl_r": Key.ctrl_r,
-            "alt": Key.alt,
-            "alt_l": Key.alt_l,
-            "alt_r": Key.alt_r,
-            "shift": Key.shift,
-            "shift_l": Key.shift_l,
-            "shift_r": Key.shift_r,
-            "super": Key.cmd,
-            "cmd": Key.cmd,
-            "win": Key.cmd,
-            "meta": Key.cmd,
-        }
-
+        """Parse hotkey string into evdev key codes."""
         parts = self.hotkey_str.lower().split("+")
+        
         for part in parts:
             part = part.strip()
-            if part in key_map:
-                self._hotkey_keys.append(key_map[part])
+            if part in self.KEY_ALIASES:
+                # Store as list of codes for alias matching
+                self._hotkey_codes.append(self.KEY_ALIASES[part])
+            elif part in self.KEY_MAP:
+                self._hotkey_codes.append(self.KEY_MAP[part])
             elif len(part) == 1:
-                self._hotkey_keys.append(KeyCode.from_char(part))
+                # Single character key
+                code = getattr(ecodes, f"KEY_{part.upper()}", None)
+                if code:
+                    self._hotkey_codes.append(code)
+                else:
+                    logger.warning(f"Unknown key: {part}")
             else:
-                # Try to parse as special key
-                try:
-                    key_attr = getattr(Key, part, None)
-                    if key_attr:
-                        self._hotkey_keys.append(key_attr)
-                except Exception:
+                # Try KEY_NAME format
+                code = getattr(ecodes, f"KEY_{part.upper()}", None)
+                if code:
+                    self._hotkey_codes.append(code)
+                else:
                     logger.warning(f"Unknown key: {part}")
 
-        logger.debug(f"Parsed hotkey: {self._hotkey_keys}")
+        logger.info(f"Parsed hotkey '{self.hotkey_str}' -> codes: {self._hotkey_codes}")
 
-    def _on_press(self, key: keyboard.Key | keyboard.KeyCode | None) -> None:
-        """Handle key press event."""
-        if key is None:
+    def _check_hotkey_pressed(self) -> bool:
+        """Check if all hotkey keys are currently pressed."""
+        for code in self._hotkey_codes:
+            if isinstance(code, list):
+                # Alias: any of the codes must be pressed
+                if not any(c in self._pressed_keys for c in code):
+                    return False
+            elif code not in self._pressed_keys:
+                return False
+        return True
+
+    def _is_hotkey_key(self, code: int) -> bool:
+        """Check if a key code is part of our hotkey."""
+        for hc in self._hotkey_codes:
+            if isinstance(hc, list):
+                if code in hc:
+                    return True
+            elif hc == code:
+                return True
+        return False
+
+    def _handle_event(self, event) -> None:
+        """Handle a keyboard event."""
+        if event.type != ecodes.EV_KEY:
             return
 
-        self._pressed_keys.add(key)
+        key_event = categorize(event)
+        code = key_event.event.code
 
-        # Check if all hotkey keys are pressed
-        if self._check_hotkey_pressed():
-            if self.mode == "hold":
-                if not self._is_active:
-                    self._is_active = True
-                    logger.debug("Hotkey pressed (hold mode)")
-                    if self.on_press:
-                        self.on_press()
-            elif self.mode == "toggle":
-                if not self._is_active:
-                    self._is_active = True
+        if key_event.keystate == 1:  # Key press
+            self._pressed_keys.add(code)
+            
+            if self._check_hotkey_pressed():
+                if self.mode == "hold":
+                    if not self._is_active:
+                        self._is_active = True
+                        logger.info("Hotkey pressed - starting recording")
+                        if self.on_press:
+                            self.on_press()
+                elif self.mode == "toggle":
                     self._toggle_state = not self._toggle_state
-                    logger.debug(f"Hotkey toggled: {self._toggle_state}")
+                    logger.info(f"Hotkey toggled: {self._toggle_state}")
                     if self._toggle_state and self.on_press:
                         self.on_press()
                     elif not self._toggle_state and self.on_release:
                         self.on_release()
 
-    def _on_release(self, key: keyboard.Key | keyboard.KeyCode | None) -> None:
-        """Handle key release event."""
-        if key is None:
+        elif key_event.keystate == 0:  # Key release
+            self._pressed_keys.discard(code)
+            
+            if self.mode == "hold" and self._is_active:
+                if self._is_hotkey_key(code):
+                    self._is_active = False
+                    logger.info("Hotkey released - stopping recording")
+                    if self.on_release:
+                        self.on_release()
+
+    def _find_keyboard_devices(self) -> list[InputDevice]:
+        """Find all keyboard input devices."""
+        devices = []
+        
+        for path in evdev.list_devices():
+            try:
+                dev = InputDevice(path)
+                capabilities = dev.capabilities()
+                
+                # Check if device has keyboard keys
+                if ecodes.EV_KEY in capabilities:
+                    keys = capabilities[ecodes.EV_KEY]
+                    # Check for ALT key as indicator of keyboard
+                    if ecodes.KEY_LEFTALT in keys or ecodes.KEY_RIGHTALT in keys:
+                        logger.info(f"Found keyboard device: {dev.name} ({path})")
+                        devices.append(dev)
+            except Exception as e:
+                logger.debug(f"Could not open device {path}: {e}")
+                continue
+
+        return devices
+
+    def _run(self) -> None:
+        """Main event loop."""
+        if not EVDEV_AVAILABLE:
+            logger.error("evdev not available, cannot listen for hotkeys")
             return
 
-        # Remove from pressed keys
-        self._pressed_keys.discard(key)
+        self._devices = self._find_keyboard_devices()
+        
+        if not self._devices:
+            logger.error("No keyboard devices found!")
+            return
 
-        # In hold mode, trigger release when any hotkey key is released
-        if self.mode == "hold" and self._is_active:
-            if key in self._hotkey_keys:
-                self._is_active = False
-                logger.debug("Hotkey released (hold mode)")
-                if self.on_release:
-                    self.on_release()
+        logger.info(f"Monitoring {len(self._devices)} keyboard device(s)")
 
-    def _check_hotkey_pressed(self) -> bool:
-        """Check if all hotkey keys are currently pressed."""
-        return all(k in self._pressed_keys for k in self._hotkey_keys)
+        while self._running:
+            try:
+                # Read events from all devices
+                for dev in self._devices:
+                    try:
+                        for event in dev.read():
+                            if not self._running:
+                                break
+                            self._handle_event(event)
+                    except BlockingIOError:
+                        # No events available, continue
+                        continue
+                    except Exception as e:
+                        logger.debug(f"Error reading from {dev.name}: {e}")
+                        
+            except Exception as e:
+                logger.error(f"Error in event loop: {e}")
+                break
 
     def start(self) -> None:
         """Start listening for hotkey."""
-        if self._listener is not None:
+        if self._running:
+            return
+
+        if not EVDEV_AVAILABLE:
+            logger.error("evdev not available. Install with: pip install evdev")
             return
 
         logger.info(f"Starting hotkey listener: {self.hotkey_str} (mode: {self.mode})")
-        self._listener = keyboard.Listener(
-            on_press=self._on_press,
-            on_release=self._on_release,
-        )
-        self._listener.start()
+        self._running = True
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
 
     def stop(self) -> None:
         """Stop listening for hotkey."""
-        if self._listener:
-            logger.info("Stopping hotkey listener")
-            self._listener.stop()
-            self._listener = None
+        if not self._running:
+            return
+
+        logger.info("Stopping hotkey listener")
+        self._running = False
+        
+        # Close devices
+        for dev in self._devices:
+            try:
+                dev.close()
+            except Exception:
+                pass
+        self._devices.clear()
+
+        if self._thread:
+            self._thread.join(timeout=1.0)
+            self._thread = None
 
     def is_active(self) -> bool:
-        """Check if hotkey is currently active (pressed or toggled on)."""
+        """Check if hotkey is currently active."""
         return self._is_active or self._toggle_state
 
     def __enter__(self) -> "HotkeyListener":

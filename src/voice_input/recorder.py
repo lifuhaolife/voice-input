@@ -1,5 +1,6 @@
 """Audio recording module."""
 
+import logging
 import tempfile
 import threading
 from pathlib import Path
@@ -7,6 +8,8 @@ from typing import Callable
 
 import numpy as np
 import sounddevice as sd
+
+logger = logging.getLogger(__name__)
 
 
 class AudioRecorder:
@@ -55,26 +58,34 @@ class AudioRecorder:
     def start_recording(self) -> None:
         """Start recording audio."""
         if self._is_recording:
+            logger.warning("Already recording, ignoring start request")
             return
 
+        logger.info("Starting audio recording...")
         self._audio_data = []
         self._stop_event.clear()
         self._is_recording = True
 
-        self._stream = sd.InputStream(
-            samplerate=self.sample_rate,
-            channels=self.channels,
-            dtype=np.float32,
-            callback=self._audio_callback,
-        )
-        self._stream.start()
+        try:
+            self._stream = sd.InputStream(
+                samplerate=self.sample_rate,
+                channels=self.channels,
+                dtype=np.float32,
+                callback=self._audio_callback,
+            )
+            self._stream.start()
+            logger.info(f"Audio stream started: {self.sample_rate}Hz, {self.channels} channel(s)")
 
-        if self.on_start:
-            self.on_start()
+            if self.on_start:
+                self.on_start()
 
-        # Start max duration timer
-        if self.max_duration > 0:
-            threading.Timer(self.max_duration, self.stop_recording).start()
+            # Start max duration timer
+            if self.max_duration > 0:
+                threading.Timer(self.max_duration, self.stop_recording).start()
+        except Exception as e:
+            logger.error(f"Failed to start recording: {e}")
+            self._is_recording = False
+            raise
 
     def stop_recording(self) -> np.ndarray | None:
         """Stop recording and return audio data.
@@ -83,8 +94,10 @@ class AudioRecorder:
             Recorded audio data as numpy array, or None if not recording.
         """
         if not self._is_recording:
+            logger.warning("Not recording, ignoring stop request")
             return None
 
+        logger.info("Stopping audio recording...")
         self._is_recording = False
         self._stop_event.set()
 
@@ -97,10 +110,12 @@ class AudioRecorder:
             self.on_stop()
 
         if not self._audio_data:
+            logger.warning("No audio data recorded")
             return None
 
         # Concatenate all audio chunks
         audio = np.concatenate(self._audio_data, axis=0)
+        logger.info(f"Recorded {len(audio)} samples ({len(audio)/self.sample_rate:.2f} seconds)")
         return audio
 
     def save_to_file(self, audio: np.ndarray, filepath: Path | None = None) -> Path:

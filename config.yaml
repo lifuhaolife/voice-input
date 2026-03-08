@@ -6,8 +6,8 @@ backend: whisper
 # Hotkey settings (press to start, release to stop)
 hotkey:
   # Key combination to trigger recording
-  # Examples: "ctrl+alt+v", "super+v", "ctrl+shift+v"
-  trigger: "ctrl+alt+v"
+  # Examples: "alt", "ctrl+alt+v", "super+v"
+  trigger: "alt"
   # Or use toggle mode: press to start, press again to stop
   mode: "hold"  # "hold" or "toggle"
 
