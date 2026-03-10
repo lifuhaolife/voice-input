@@ -1,6 +1,6 @@
 """Speech recognition backends."""
 
 from voice_input.recognizer.base import Recognizer
-from voice_input.recognizer.whisper_backend import WhisperRecognizer
+from voice_input.recognizer.xunfei import XunfeiStreamer, XunfeiRecognizer
 
-__all__ = ["Recognizer", "WhisperRecognizer"]
+__all__ = ["Recognizer", "XunfeiStreamer", "XunfeiRecognizer"]

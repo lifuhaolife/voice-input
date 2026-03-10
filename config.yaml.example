@@ -1,0 +1,66 @@
+# Voice Input Configuration
+# 流式语音输入配置
+# 使用说明：复制此文件为 config.yaml 并填入你的 API 密钥
+
+# 语音识别后端: xunfei(推荐) / tencent / baidu
+backend: xunfei
+
+# 快捷键设置
+hotkey:
+  # 触发键: 按住录音，松开识别
+  # 支持: alt, alt_l, alt_r, ctrl, shift, super 或组合键如 ctrl+alt+v
+  trigger: "alt+m"
+  # 模式: hold(按住) / toggle(切换)
+  mode: "hold"
+
+# 录音设置
+recording:
+  sample_rate: 16000
+  channels: 1
+  # 每块音频时长(毫秒)，用于流式传输
+  chunk_ms: 40
+  # 最长录音时长(秒)
+  max_duration: 30
+
+# 讯飞语音识别配置 (推荐 - 支持动态修正)
+# 获取方式: https://console.xfyun.cn/ -> 创建应用 -> 语音听写
+xunfei:
+  app_id: "YOUR_APP_ID"
+  api_key: "YOUR_API_KEY"
+  api_secret: "YOUR_API_SECRET"
+  # 语言: zh_cn(中文), en_us(英文)
+  language: "zh_cn"
+  # 方言: mandarin(普通话), cantonese(粤语)
+  accent: "mandarin"
+
+# 腾讯语音识别配置 (备选)
+# 获取方式: https://console.cloud.tencent.com/asr
+tencent:
+  app_id: ""
+  secret_id: ""
+  secret_key: ""
+
+# 百度语音识别配置 (备选)
+# 获取方式: https://console.bce.baidu.com/ai/#/ai/speech/
+baidu:
+  app_id: ""
+  api_key: ""
+  secret_key: ""
+
+# 音效反馈
+sound:
+  # 是否启用提示音
+  enabled: false
+
+# 文本输入设置
+input:
+  # 输入方式: type(模拟按键) / clipboard(剪贴板粘贴)
+  method: "type"
+  # 按键间隔(秒)
+  type_delay: 0.005
+
+# 通知设置 (建议关闭)
+notification:
+  enabled: false
+  show_status: false
+  show_result: false

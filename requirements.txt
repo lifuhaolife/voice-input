@@ -1,6 +1,21 @@
-pynput>=1.7.6
+# 流式语音输入依赖
+
+# 音频录制
 sounddevice>=0.4.6
 numpy>=1.24.0
+
+# 配置管理
 pyyaml>=6.0
-openai-whisper>=20231117
+
+# WebSocket (流式识别)
+websocket-client>=1.6.0
+
+# 文本输入
 pyperclip>=1.8.2
+
+# 快捷键监听
+python-xlib>=0.33  # X11
+evdev>=1.6.1       # Wayland/Linux native
+
+# 可选: 音频文件支持
+# soundfile>=0.12.0

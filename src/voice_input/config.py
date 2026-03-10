@@ -11,43 +11,45 @@ class Config:
     """Configuration manager for voice input."""
 
     DEFAULT_CONFIG = {
-        "backend": "whisper",
+        "backend": "xunfei",
         "hotkey": {
-            "trigger": "ctrl+alt+v",
+            "trigger": "alt",
             "mode": "hold",
         },
         "recording": {
             "sample_rate": 16000,
             "channels": 1,
-            "max_duration": 60,
+            "chunk_ms": 40,
+            "max_duration": 30,
         },
-        "whisper": {
-            "model": "small",
-            "language": "zh",
-            "device": "auto",
+        "xunfei": {
+            "app_id": "",
+            "api_key": "",
+            "api_secret": "",
+            "language": "zh_cn",
+            "accent": "mandarin",
+        },
+        "tencent": {
+            "app_id": "",
+            "secret_id": "",
+            "secret_key": "",
         },
         "baidu": {
             "app_id": "",
             "api_key": "",
             "secret_key": "",
         },
-        "xunfei": {
-            "app_id": "",
-            "api_key": "",
-            "api_secret": "",
-        },
-        "tencent": {
-            "secret_id": "",
-            "secret_key": "",
+        "sound": {
+            "enabled": True,
         },
         "notification": {
-            "enabled": True,
-            "show_status": True,
-            "show_result": True,
+            "enabled": False,
+            "show_status": False,
+            "show_result": False,
         },
         "input": {
             "method": "type",
-            "type_delay": 0.01,
+            "type_delay": 0.005,
         },
     }
 
@@ -136,9 +138,24 @@ class Config:
         return self._config["recording"]
 
     @property
-    def whisper(self) -> dict:
-        """Whisper configuration."""
-        return self._config["whisper"]
+    def xunfei(self) -> dict:
+        """Xunfei configuration."""
+        return self._config["xunfei"]
+
+    @property
+    def tencent(self) -> dict:
+        """Tencent configuration."""
+        return self._config["tencent"]
+
+    @property
+    def baidu(self) -> dict:
+        """Baidu configuration."""
+        return self._config["baidu"]
+
+    @property
+    def sound(self) -> dict:
+        """Sound configuration."""
+        return self._config["sound"]
 
     @property
     def notification(self) -> dict:

@@ -4,15 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "voice-input"
-version = "0.1.0"
-description = "Voice input tool with multiple speech recognition backends"
+version = "0.2.0"
+description = "流式语音输入工具 - 支持讯飞/腾讯/百度云API"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
     {name = "lifuhaolife"}
 ]
-keywords = ["voice", "speech", "input", "whisper", "linux"]
+keywords = ["voice", "speech", "input", "streaming", "linux"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: X11 Applications",
@@ -27,12 +27,13 @@ classifiers = [
 ]
 
 dependencies = [
-    "pynput>=1.7.6",
     "sounddevice>=0.4.6",
     "numpy>=1.24.0",
     "pyyaml>=6.0",
-    "openai-whisper>=20231117",
+    "websocket-client>=1.6.0",
     "pyperclip>=1.8.2",
+    "python-xlib>=0.33",
+    "evdev>=1.6.1",
 ]
 
 [project.optional-dependencies]
@@ -53,8 +54,3 @@ where = ["src"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
-
-[tool.black]
-line-length = 100
-target-version = ["py310"]

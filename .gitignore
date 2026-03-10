@@ -53,3 +53,6 @@ whisper_models/
 # OS
 .DS_Store
 Thumbs.db
+
+# Config with sensitive data
+config.yaml

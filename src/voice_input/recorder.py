@@ -1,10 +1,10 @@
-"""Audio recording module."""
+"""Audio recording module - 支持流式录音和批量录音"""
 
 import logging
 import tempfile
 import threading
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Optional
 
 import numpy as np
 import sounddevice as sd
@@ -185,3 +185,125 @@ class AudioRecorder:
                     "sample_rate": dev["default_samplerate"],
                 })
         return input_devices
+
+
+class StreamingRecorder:
+    """流式录音器 - 实时输出音频块，用于流式语音识别"""
+
+    def __init__(
+        self,
+        sample_rate: int = 16000,
+        channels: int = 1,
+        chunk_ms: int = 40,
+        on_chunk: Optional[Callable[[bytes], None]] = None,
+    ):
+        """初始化流式录音器
+
+        Args:
+            sample_rate: 采样率 (Hz)
+            channels: 声道数
+            chunk_ms: 每块音频时长 (毫秒)
+            on_chunk: 音频块回调函数，接收PCM字节
+        """
+        self.sample_rate = sample_rate
+        self.channels = channels
+        self.chunk_ms = chunk_ms
+        self.on_chunk = on_chunk
+
+        # 计算每块采样数 (40ms @ 16kHz = 640 samples)
+        self.chunk_size = int(sample_rate * chunk_ms / 1000)
+
+        self._is_recording = False
+        self._stream: Optional[sd.InputStream] = None
+        self._audio_buffer: list[np.ndarray] = []
+        self._lock = threading.Lock()
+
+    @property
+    def is_recording(self) -> bool:
+        """是否正在录音"""
+        return self._is_recording
+
+    def _audio_callback(self, indata: np.ndarray, frames: int, time_info: dict, status: sd.CallbackFlags) -> None:
+        """音频回调 - 实时输出PCM数据"""
+        if not self._is_recording:
+            return
+
+        with self._lock:
+            self._audio_buffer.append(indata.copy())
+
+        # 转换为PCM字节并发送
+        if self.on_chunk:
+            # float32 -> int16 -> bytes
+            pcm_data = (indata[:, 0] * 32767).astype(np.int16).tobytes()
+            self.on_chunk(pcm_data)
+
+    def start(self) -> bool:
+        """开始流式录音
+
+        Returns:
+            是否成功启动
+        """
+        if self._is_recording:
+            logger.warning("已在录音中")
+            return False
+
+        logger.info(f"开始流式录音: {self.sample_rate}Hz, 块大小{self.chunk_ms}ms")
+
+        with self._lock:
+            self._audio_buffer = []
+
+        self._is_recording = True
+
+        try:
+            self._stream = sd.InputStream(
+                samplerate=self.sample_rate,
+                channels=self.channels,
+                dtype=np.float32,
+                blocksize=self.chunk_size,
+                callback=self._audio_callback,
+            )
+            self._stream.start()
+            logger.debug("流式录音已启动")
+            return True
+
+        except Exception as e:
+            logger.error(f"启动流式录音失败: {e}")
+            self._is_recording = False
+            return False
+
+    def stop(self) -> np.ndarray | None:
+        """停止录音并返回完整音频数据
+
+        Returns:
+            完整的音频数据 (numpy array)，或None
+        """
+        if not self._is_recording:
+            return None
+
+        logger.info("停止流式录音")
+        self._is_recording = False
+
+        if self._stream:
+            self._stream.stop()
+            self._stream.close()
+            self._stream = None
+
+        with self._lock:
+            if not self._audio_buffer:
+                return None
+            audio = np.concatenate(self._audio_buffer, axis=0)
+            self._audio_buffer = []
+
+        logger.info(f"录音完成: {len(audio)} 采样 ({len(audio)/self.sample_rate:.2f}秒)")
+        return audio
+
+    def get_pcm_bytes(self, audio: np.ndarray) -> bytes:
+        """将numpy音频数据转换为PCM字节
+
+        Args:
+            audio: 音频数据 (float32)
+
+        Returns:
+            PCM字节 (int16)
+        """
+        return (audio[:, 0] * 32767).astype(np.int16).tobytes()
