@@ -9,7 +9,7 @@ backend: xunfei
 hotkey:
   # 触发键: 按住录音，松开识别
   # 支持: alt, alt_l, alt_r, ctrl, shift, super 或组合键如 ctrl+alt+v
-  trigger: "alt+m"
+  trigger: "alt_r"
   # 模式: hold(按住) / toggle(切换)
   mode: "hold"
 
@@ -32,6 +32,8 @@ xunfei:
   language: "zh_cn"
   # 方言: mandarin(普通话), cantonese(粤语)
   accent: "mandarin"
+  # 语音结束静默时长(毫秒), 越大支持越长的停顿, 默认5000
+  vad_eos: 5000
 
 # 腾讯语音识别配置 (备选)
 # 获取方式: https://console.cloud.tencent.com/asr
@@ -54,8 +56,8 @@ sound:
 
 # 文本输入设置
 input:
-  # 输入方式: type(模拟按键) / clipboard(剪贴板粘贴)
-  method: "type"
+  # 输入方式: clipboard(推荐,GNOME Wayland最可靠) / xdotool / ydotool(仅ASCII) / wtype / type
+  method: "clipboard"
   # 按键间隔(秒)
   type_delay: 0.005
 
@@ -64,3 +66,12 @@ notification:
   enabled: false
   show_status: false
   show_result: false
+
+# 日志设置
+logging:
+  # 日志级别: debug, info, warning, error
+  level: "info"
+  # 是否打印音频块处理信息（debug级别有效）
+  show_audio_chunks: false
+  # 是否打印识别的文本内容（debug级别有效）
+  show_recognized_text: false

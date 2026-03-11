@@ -1,20 +1,22 @@
 # Voice Input
 
-🎤 **语音输入工具** - Linux 上的语音转文字输入工具，支持多种语音识别后端。
+🎤 **流式语音输入工具** - Linux 上的实时语音转文字输入工具，支持讯飞流式语音识别，边说边出文字。
 
 ## 功能特性
 
-- 🎙️ **快捷键触发** - 按住快捷键录音，松开自动识别并输入
-- 🔄 **多后端支持** - 支持 Whisper（本地）、百度、讯飞、腾讯云语音识别
-- ⌨️ **自动输入** - 识别结果自动输入到当前光标位置
-- 🔔 **系统通知** - 录音状态和识别结果通知
-- ⚙️ **灵活配置** - YAML 配置文件，支持多种参数调整
+- 🎙️ **快捷键触发** - 按住快捷键录音，松开自动识别并输入到光标位置
+- 🔄 **流式识别** - 讯飞语音识别，边说边显示，支持动态修正
+- ⚡ **低延迟** - 流式传输，实时返回识别结果
+- ⌨️ **自动输入** - 识别结果自动输入到当前光标位置（支持 X11/Wayland）
+- 🔧 **后台运行** - 支持后台守护进程模式运行
+- 📝 **调试日志** - 可配置日志级别，便于调试
 
 ## 系统要求
 
 - Python 3.10+
 - Linux (X11 或 Wayland)
 - 麦克风设备
+- 讯飞开放平台账号（免费额度充足）
 
 ## 安装
 
@@ -25,43 +27,57 @@ git clone https://github.com/lifuhaolife/voice-input.git
 cd voice-input
 ```
 
-### 2. 安装依赖
+### 2. 运行安装脚本
 
 ```bash
-# 创建虚拟环境（推荐）
+./scripts/install.sh
+```
+
+或手动安装：
+
+```bash
+# 创建虚拟环境
 python -m venv venv
 source venv/bin/activate
 
-# 安装包
+# 安装依赖
 pip install -e .
 ```
 
-### 3. 安装系统依赖
+### 3. 配置讯飞 API
 
-```bash
-# Ubuntu/Debian
-sudo apt install libportaudio2 portaudio19-dev
-
-# 可选：用于通知功能
-sudo apt install libnotify-bin
-```
-
-### 4. 下载 Whisper 模型（首次运行自动下载）
-
-模型会自动下载到 `~/.cache/whisper/` 目录。
+1. 访问 [讯飞开放平台](https://console.xfyun.cn/) 创建应用
+2. 开通"语音听写"服务
+3. 复制 `config.yaml.example` 为 `config.yaml`：
+   ```bash
+   cp config.yaml.example config.yaml
+   ```
+4. 编辑 `config.yaml`，填入你的 API 密钥：
+   ```yaml
+   xunfei:
+     app_id: "你的appid"
+     api_key: "你的apikey"
+     api_secret: "你的apisecret"
+   ```
 
 ## 使用方法
 
 ### 启动程序
 
 ```bash
+# 前台运行
 voice-input
+
+# 后台运行
+./scripts/voice-input.sh --background
+# 或
+./scripts/voice-input.sh -b
 ```
 
 ### 快捷键操作
 
-- **按住** `Ctrl+Alt+V` 开始录音
-- **松开** 自动停止录音并识别
+- **按住** `Alt+M`（默认）开始录音
+- **松开** 自动停止录音并输入文字
 - 识别结果会自动输入到当前光标位置
 
 ### 命令行选项
@@ -76,121 +92,84 @@ voice-input --list-devices
 # 使用自定义配置
 voice-input --config my-config.yaml
 
-# 指定 Whisper 模型
-voice-input --model small
-
-# 自定义快捷键
-voice-input --hotkey "ctrl+shift+v"
-
 # 详细日志
 voice-input -v
 ```
 
 ## 配置
 
-配置文件位于 `~/.config/voice-input/config.yaml`：
+配置文件位于 `~/.config/voice-input/config.yaml` 或项目目录 `config.yaml`：
 
 ```yaml
 # 语音识别后端
-backend: whisper
+backend: xunfei
 
 # 快捷键设置
 hotkey:
-  trigger: "ctrl+alt+v"
-  mode: "hold"  # hold 或 toggle
+  trigger: "alt+m"    # 支持: alt, ctrl, shift, super 或组合键
+  mode: "hold"        # hold(按住) 或 toggle(切换)
 
 # 录音设置
 recording:
   sample_rate: 16000
   channels: 1
-  max_duration: 60
+  chunk_ms: 40        # 每块音频时长(毫秒)
+  max_duration: 30    # 最长录音时长(秒)
 
-# Whisper 设置
-whisper:
-  model: "small"      # tiny, base, small, medium, large
-  language: "zh"      # 语言代码，留空自动检测
-  device: "auto"      # auto, cuda, cpu
+# 讯飞语音识别配置
+xunfei:
+  app_id: ""
+  api_key: ""
+  api_secret: ""
+  language: "zh_cn"   # zh_cn(中文), en_us(英文)
+  accent: "mandarin"  # mandarin(普通话), cantonese(粤语)
 
-# 通知设置
-notification:
-  enabled: true
-  show_status: true
-  show_result: true
+# 音效反馈
+sound:
+  enabled: false
 
-# 输入设置
+# 文本输入设置
 input:
-  method: "type"      # type 或 clipboard
-  type_delay: 0.01
+  method: "type"      # type(模拟按键) 或 clipboard(剪贴板)
+  type_delay: 0.005
+
+# 日志设置
+logging:
+  level: "info"       # debug, info, warning, error
+  show_audio_chunks: false    # 打印音频块信息
+  show_recognized_text: false # 打印识别的文本内容
 ```
 
-## 后端对比
+### 调试模式
 
-| 后端 | 离线 | 中文支持 | 准确率 | 费用 |
-|------|------|----------|--------|------|
-| Whisper | ✅ | ✅ 优秀 | 高 | 免费 |
-| 百度 | ❌ | ✅ 优秀 | 高 | 按量收费 |
-| 讯飞 | ❌ | ✅ 优秀 | 高 | 按量收费 |
-| 腾讯云 | ❌ | ✅ 优秀 | 高 | 按量收费 |
+在 `config.yaml` 中设置：
 
-## 硬件要求
-
-### Whisper 模型选择
-
-| 模型 | 参数量 | 内存需求 | 速度 | 准确率 |
-|------|--------|----------|------|--------|
-| tiny | 39M | ~1GB | 极快 | 一般 |
-| base | 74M | ~1GB | 快 | 较好 |
-| small | 244M | ~2GB | 中等 | 好 |
-| medium | 769M | ~5GB | 较慢 | 很好 |
-| large | 1550M | ~10GB | 慢 | 最好 |
-
-**推荐**：
-- CPU: `small` 或 `base`
-- GPU: `medium` 或 `large`
-
-## 开发
-
-### 项目结构
-
-```
-voice-input/
-├── src/voice_input/
-│   ├── main.py              # 主入口
-│   ├── config.py            # 配置管理
-│   ├── recorder.py          # 录音模块
-│   ├── hotkey.py            # 快捷键监听
-│   ├── typer.py             # 文本输入
-│   ├── notify.py            # 系统通知
-│   └── recognizer/          # 语音识别后端
-│       ├── base.py          # 抽象基类
-│       └── whisper_backend.py
-├── config.yaml
-├── pyproject.toml
-└── README.md
+```yaml
+logging:
+  level: "debug"
+  show_audio_chunks: true      # 查看音频块处理
+  show_recognized_text: true   # 查看识别文本内容
 ```
 
-### 添加新的识别后端
+或使用命令行参数：
 
-1. 在 `recognizer/` 目录创建新文件，如 `baidu_backend.py`
-2. 继承 `Recognizer` 基类并实现接口
-3. 在 `main.py` 中注册新后端
+```bash
+voice-input -v
+```
 
-```python
-# recognizer/baidu_backend.py
-from voice_input.recognizer.base import Recognizer
+## 后台运行
 
-class BaiduRecognizer(Recognizer):
-    @property
-    def name(self) -> str:
-        return "baidu"
+使用启动脚本的后台模式：
 
-    def is_available(self) -> bool:
-        # 检查配置和依赖
-        pass
+```bash
+# 启动后台服务
+./scripts/voice-input.sh --background
 
-    def transcribe(self, audio_data) -> str:
-        # 调用百度 API
-        pass
+# 查看日志
+tail -f /tmp/voice-input.log
+
+# 停止服务
+kill $(cat /tmp/voice-input.pid)
 ```
 
 ## 故障排除
@@ -208,12 +187,50 @@ arecord -d 3 test.wav
 ### 快捷键不响应
 
 - 确保没有其他程序占用该快捷键
-- 尝试使用其他快捷键组合
+- 尝试使用其他快捷键组合，如 `ctrl+alt+v`
+- 检查是否有权限访问输入设备
 
-### Whisper 模型下载慢
+### 文字没有输入到光标位置
 
-可以手动下载模型到 `~/.cache/whisper/`：
-- [模型下载地址](https://github.com/openai/whisper/blob/main/whisper/__init__.py#L17-L30)
+- **Wayland 用户**：确保安装了 `wtype` 或 `ydotool`
+  ```bash
+  # Ubuntu/Debian
+  sudo apt install wtype
+  # 或
+  sudo apt install ydotool
+  ```
+- **X11 用户**：确保安装了 `xdotool`
+  ```bash
+  sudo apt install xdotool
+  ```
+
+### 讯飞 API 错误
+
+- 检查 `config.yaml` 中的 API 密钥是否正确
+- 确认讯飞控制台中已开通"语音听写"服务
+- 查看日志获取详细错误信息
+
+## 项目结构
+
+```
+voice-input/
+├── src/voice_input/
+│   ├── main.py              # 主入口
+│   ├── config.py            # 配置管理
+│   ├── recorder.py          # 录音模块（流式）
+│   ├── hotkey.py            # 快捷键监听
+│   ├── typer.py             # 文本输入（支持X11/Wayland）
+│   ├── sound.py             # 音效反馈
+│   └── recognizer/          # 语音识别后端
+│       └── xunfei.py        # 讯飞流式识别
+├── scripts/
+│   ├── install.sh           # 安装脚本
+│   ├── voice-input.sh       # 启动脚本（支持后台运行）
+│   └── voice-input.desktop  # 桌面启动项
+├── config.yaml.example      # 配置模板
+├── pyproject.toml
+└── README.md
+```
 
 ## 许可证
 

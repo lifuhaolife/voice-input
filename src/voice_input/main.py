@@ -16,7 +16,15 @@ from voice_input.recognizer.xunfei import XunfeiStreamer
 from voice_input.sound import SoundFeedback
 from voice_input.typer import TextInput
 
-# 配置日志
+# 日志级别映射
+LOG_LEVELS = {
+    "debug": logging.DEBUG,
+    "info": logging.INFO,
+    "warning": logging.WARNING,
+    "error": logging.ERROR,
+}
+
+# 默认日志配置（将在应用启动时根据配置更新）
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -35,6 +43,9 @@ class StreamingVoiceInput:
             config: 配置实例
         """
         self.config = config
+
+        # 根据配置设置日志级别
+        self._setup_logging()
 
         # 初始化组件
         self.sound = SoundFeedback(enabled=config.sound.get("enabled", True))
@@ -62,14 +73,37 @@ class StreamingVoiceInput:
         # 运行状态
         self._running = False
 
+    def _setup_logging(self):
+        """根据配置设置日志级别"""
+        log_config = self.config.logging_config
+        level_name = log_config.get("level", "info").lower()
+        level = LOG_LEVELS.get(level_name, logging.INFO)
+
+        # 更新根日志级别
+        logging.getLogger().setLevel(level)
+        logger.setLevel(level)
+
+        if level == logging.DEBUG:
+            logger.debug("调试模式已启用")
+            logger.debug(f"日志配置: {log_config}")
+
     def _on_audio_chunk(self, pcm_bytes: bytes):
         """音频块回调 - 发送到流式识别器"""
         if self.streamer and self._is_recording:
+            # debug模式下打印音频块信息
+            if self.config.logging_config.get("show_audio_chunks"):
+                logger.debug(f"音频块: {len(pcm_bytes)} bytes")
             self.streamer.send_audio(pcm_bytes)
 
     def _on_result(self, text: str, is_final: bool):
         """识别结果回调 - 边说边显示"""
         self.current_text = text
+
+        # debug模式下打印识别的文本内容
+        if self.config.logging_config.get("show_recognized_text"):
+            status = "最终结果" if is_final else "中间结果"
+            logger.debug(f"[{status}] 识别文本: '{text}'")
+
         # 实时显示识别文字（覆盖上一行）
         if text:
             # \r回到行首，\033[K清除到行尾，\033[32m绿色
@@ -99,6 +133,7 @@ class StreamingVoiceInput:
                 language=self.config.xunfei.get("language", "zh_cn"),
                 accent=self.config.xunfei.get("accent", "mandarin"),
                 on_result=self._on_result,
+                vad_eos=self.config.xunfei.get("vad_eos", 5000),
             )
         else:
             logger.error(f"不支持的后端: {backend}")
@@ -134,8 +169,11 @@ class StreamingVoiceInput:
             self.streamer = None
 
             if final_text:
-                logger.info(f"输入文字: {final_text}")
-                self.text_input.input_text(final_text)
+                logger.info(f"识别结果: {final_text}")
+                success = self.text_input.input_text(final_text)
+                if not success:
+                    logger.error("文字输入失败，请检查输入方式配置")
+                    print(f"\033[31m❌ 输入失败，文字内容: {final_text}\033[0m")
             else:
                 logger.warning("未识别到文字")
 

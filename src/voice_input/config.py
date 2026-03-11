@@ -51,6 +51,11 @@ class Config:
             "method": "type",
             "type_delay": 0.005,
         },
+        "logging": {
+            "level": "info",  # debug, info, warning, error
+            "show_audio_chunks": False,  # 是否打印音频块处理信息
+            "show_recognized_text": False,  # 是否打印识别的文本内容
+        },
     }
 
     def __init__(self, config_path: Path | None = None):
@@ -166,6 +171,15 @@ class Config:
     def input_config(self) -> dict:
         """Input configuration."""
         return self._config["input"]
+
+    @property
+    def logging_config(self) -> dict:
+        """Logging configuration."""
+        return self._config.get("logging", {
+            "level": "info",
+            "show_audio_chunks": False,
+            "show_recognized_text": False,
+        })
 
     def save(self) -> None:
         """Save current configuration to file."""
