@@ -18,11 +18,13 @@ class TextInput:
         """Initialize text input handler.
 
         Args:
-            method: Input method - "type", "clipboard", "ydotool", "xdotool".
+            method: Input method - "portal", "clipboard", "ydotool", "xdotool", "wtype", "type".
             type_delay: Delay between keystrokes in seconds.
         """
         self.method = method
         self.type_delay = type_delay
+        self._portal = None
+        self._portal_available: bool | None = None  # None=未检测, True/False=已检测
 
     def input_text(self, text: str) -> bool:
         """Input text at current cursor position.
@@ -41,7 +43,14 @@ class TextInput:
         # 根据配置的方法或自动检测选择输入方式
         methods = []
 
-        if self.method == "clipboard":
+        if self.method == "portal":
+            # Portal 模式：RemoteDesktop Portal 直接输入（GNOME Wayland 推荐）
+            if self._check_remote_desktop_portal():
+                methods.append(("portal", self._input_via_remote_desktop_portal))
+            # 回退到剪贴板粘贴
+            if self._check_wl_copy() and self._check_ydotool():
+                methods.append(("wl-clipboard+ydotool", self._input_via_clipboard_paste))
+        elif self.method == "clipboard":
             # 剪贴板模式：wl-copy + ydotool Ctrl+V（推荐，支持中文）
             if self._check_wl_copy() and self._check_ydotool():
                 methods.append(("wl-clipboard+ydotool", self._input_via_clipboard_paste))
@@ -56,19 +65,22 @@ class TextInput:
             methods.append(("wtype", self._input_via_wtype))
         else:
             # 自动检测可用方式（按优先级）
-            # 1. 剪贴板粘贴（wl-copy + ydotool Ctrl+V，GNOME Wayland 最可靠）
+            # 1. RemoteDesktop Portal（GNOME Wayland 直接输入，支持 Unicode）
+            if self._check_remote_desktop_portal():
+                methods.append(("portal", self._input_via_remote_desktop_portal))
+            # 2. 剪贴板粘贴（wl-copy + ydotool Ctrl+V，GNOME Wayland 后备）
             if self._check_wl_copy() and self._check_ydotool():
                 methods.append(("wl-clipboard+ydotool", self._input_via_clipboard_paste))
-            # 2. xdotool（XWayland 环境，非 GNOME Wayland）
+            # 3. xdotool（XWayland 环境，非 GNOME Wayland）
             if self._check_xdotool():
                 methods.append(("xdotool", self._input_via_xdotool))
-            # 3. wtype（部分 Wayland 合成器支持）
+            # 4. wtype（部分 Wayland 合成器支持）
             if self._check_wtype():
                 methods.append(("wtype", self._input_via_wtype))
-            # 4. ydotool（仅支持 ASCII）
+            # 5. ydotool（仅支持 ASCII）
             if self._check_ydotool():
                 methods.append(("ydotool", self._input_via_ydotool))
-            # 5. pynput（X11 后备）
+            # 6. pynput（X11 后备）
             methods.append(("pynput", self._input_via_keyboard))
 
         # 尝试每种方法，直到成功
@@ -106,6 +118,20 @@ class TextInput:
         return []
 
     # --- Check methods ---
+
+    def _check_remote_desktop_portal(self) -> bool:
+        """Check if RemoteDesktop Portal is available (cached after first call)."""
+        if self._portal_available is not None:
+            return self._portal_available
+        try:
+            from voice_input.portal import RemoteDesktopPortal
+            self._portal = RemoteDesktopPortal(type_delay=self.type_delay)
+            self._portal_available = True
+            logger.info("RemoteDesktop Portal 初始化成功")
+        except Exception as e:
+            logger.warning(f"RemoteDesktop Portal 不可用: {e}")
+            self._portal_available = False
+        return self._portal_available
 
     def _check_wl_copy(self) -> bool:
         """Check if wl-copy is available (Wayland clipboard)."""
@@ -157,46 +183,75 @@ class TextInput:
 
     # --- Input methods ---
 
-    def _input_via_clipboard_paste(self, text: str) -> bool:
-        """Input text using wl-copy + ydotool Ctrl+V.
+    def _input_via_remote_desktop_portal(self, text: str) -> bool:
+        """Input text via RemoteDesktop Portal (GNOME Wayland, supports Unicode/Chinese)."""
+        try:
+            return self._portal.type_text(text)
+        except Exception as e:
+            logger.error(f"Portal 输入失败: {e}")
+            return False
 
-        Most reliable method for Chinese text on GNOME Wayland:
-        - wl-copy handles any Unicode text
-        - ydotool sends Ctrl+V via uinput (no need to type characters)
+    @staticmethod
+    def _is_terminal_focused() -> bool:
+        """Detect if a terminal emulator is currently focused (GNOME Wayland)."""
+        terminal_classes = {
+            "gnome-terminal", "gnome-terminal-server", "kitty", "alacritty",
+            "xterm", "urxvt", "tilix", "terminator", "konsole", "foot",
+            "wezterm", "st", "sakura", "xfce4-terminal",
+        }
+        try:
+            result = subprocess.run(
+                [
+                    "gdbus", "call", "--session",
+                    "--dest", "org.gnome.Shell",
+                    "--object-path", "/org/gnome/Shell",
+                    "--method", "org.gnome.Shell.Eval",
+                    "global.display.focus_window?.get_wm_class() ?? ''",
+                ],
+                capture_output=True, text=True, timeout=2,
+            )
+            if result.returncode == 0:
+                wm_class = result.stdout.lower()
+                return any(t in wm_class for t in terminal_classes)
+        except Exception:
+            pass
+        return False
+
+    def _input_via_clipboard_paste(self, text: str) -> bool:
+        """Input text using wl-copy + ydotool paste shortcut.
+
+        Detects focused window: terminals use Ctrl+Shift+V, others use Ctrl+V.
         """
         try:
             logger.debug("使用 wl-copy 复制到剪贴板...")
-            result = subprocess.run(
+            # wl-copy 持有剪贴板直到有人粘贴，必须后台运行不等待
+            proc = subprocess.Popen(
                 self._user_cmd_prefix(wayland=True) + ["wl-copy", "--", text],
-                capture_output=True,
-                text=True,
-                timeout=5,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
             )
 
-            if result.returncode != 0:
-                logger.warning(f"wl-copy 失败: {result.stderr}")
-                return False
+            # 等待 wl-copy 就绪，同时检测目标窗口类型
+            is_terminal = self._is_terminal_focused()
+            paste_key = "ctrl+shift+v" if is_terminal else "ctrl+v"
+            logger.debug(f"目标窗口: {'终端' if is_terminal else '普通应用'}，使用 {paste_key}")
 
-            # 等待剪贴板更新
-            time.sleep(0.15)
+            time.sleep(0.2)
 
-            logger.debug("使用 ydotool 模拟 Ctrl+V...")
             result = subprocess.run(
-                ["ydotool", "key", "ctrl+v"],
-                capture_output=True,
-                text=True,
-                timeout=5,
+                ["ydotool", "key", paste_key],
+                capture_output=True, text=True, timeout=5,
             )
+
+            # 粘贴后终止 wl-copy
+            proc.terminate()
 
             if result.returncode == 0:
                 return True
             else:
-                logger.warning(f"ydotool Ctrl+V 失败: {result.stderr}")
-                print(f"已复制到剪贴板，请按 Ctrl+V 粘贴")
+                logger.warning(f"ydotool {paste_key} 失败: {result.stderr}")
+                print(f"已复制到剪贴板，请手动粘贴")
                 return True
-        except subprocess.TimeoutExpired:
-            logger.error("剪贴板输入超时")
-            return False
         except Exception as e:
             logger.error(f"剪贴板输入失败: {e}")
             return False
@@ -341,6 +396,13 @@ class TextInput:
     def check_dependencies() -> dict[str, bool]:
         """Check if required dependencies are available."""
         deps = {}
+
+        # RemoteDesktop Portal
+        try:
+            from voice_input.portal import RemoteDesktopPortal
+            deps["portal"] = RemoteDesktopPortal.is_available()
+        except Exception:
+            deps["portal"] = False
 
         try:
             from pynput.keyboard import Controller  # noqa: F401

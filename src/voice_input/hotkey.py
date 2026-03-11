@@ -132,31 +132,31 @@ class HotkeyListener:
 
         if key_event.keystate == 1:  # Key press
             self._pressed_keys.add(code)
-            
+
             if self._check_hotkey_pressed():
                 if self.mode == "hold":
                     if not self._is_active:
                         self._is_active = True
                         logger.info("Hotkey pressed - starting recording")
                         if self.on_press:
-                            self.on_press()
+                            threading.Thread(target=self.on_press, daemon=True).start()
                 elif self.mode == "toggle":
                     self._toggle_state = not self._toggle_state
                     logger.info(f"Hotkey toggled: {self._toggle_state}")
                     if self._toggle_state and self.on_press:
-                        self.on_press()
+                        threading.Thread(target=self.on_press, daemon=True).start()
                     elif not self._toggle_state and self.on_release:
-                        self.on_release()
+                        threading.Thread(target=self.on_release, daemon=True).start()
 
         elif key_event.keystate == 0:  # Key release
             self._pressed_keys.discard(code)
-            
+
             if self.mode == "hold" and self._is_active:
                 if self._is_hotkey_key(code):
                     self._is_active = False
                     logger.info("Hotkey released - stopping recording")
                     if self.on_release:
-                        self.on_release()
+                        threading.Thread(target=self.on_release, daemon=True).start()
 
     def _find_keyboard_devices(self) -> list[InputDevice]:
         """Find all keyboard input devices."""

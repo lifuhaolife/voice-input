@@ -17,6 +17,7 @@
 - Linux (X11 或 Wayland)
 - 麦克风设备
 - 讯飞开放平台账号（免费额度充足）
+- GNOME Wayland 推荐：`ydotool` + `wl-clipboard`（自动粘贴）
 
 ## 安装
 
@@ -65,20 +66,21 @@ pip install -e .
 ### 启动程序
 
 ```bash
-# 前台运行
-voice-input
+# GNOME Wayland（推荐，保留 PipeWire 音频环境）
+sudo -E venv/bin/voice-input
+
+# 或使用启动脚本（自动判断是否需要 sudo）
+./scripts/voice-input.sh
 
 # 后台运行
 ./scripts/voice-input.sh --background
-# 或
-./scripts/voice-input.sh -b
 ```
 
 ### 快捷键操作
 
-- **按住** `Alt+M`（默认）开始录音
-- **松开** 自动停止录音并输入文字
-- 识别结果会自动输入到当前光标位置
+- **按住** 右 Alt（默认）开始录音
+- **松开** 自动停止录音，识别结果直接输入到当前光标位置
+- 终端和普通应用均支持，自动选择正确的粘贴快捷键
 
 ### 命令行选项
 
@@ -130,7 +132,10 @@ sound:
 
 # 文本输入设置
 input:
-  method: "type"      # type(模拟按键) 或 clipboard(剪贴板)
+  # clipboard: 剪贴板自动粘贴（推荐，支持终端和所有应用）
+  # portal: RemoteDesktop Portal 直接输入（GNOME Wayland，需首次授权）
+  # xdotool / ydotool / wtype: 其他输入方式
+  method: "clipboard"
   type_delay: 0.005
 
 # 日志设置
@@ -192,17 +197,30 @@ arecord -d 3 test.wav
 
 ### 文字没有输入到光标位置
 
-- **Wayland 用户**：确保安装了 `wtype` 或 `ydotool`
-  ```bash
-  # Ubuntu/Debian
-  sudo apt install wtype
-  # 或
-  sudo apt install ydotool
-  ```
-- **X11 用户**：确保安装了 `xdotool`
-  ```bash
-  sudo apt install xdotool
-  ```
+**GNOME Wayland（推荐方案）**：使用剪贴板自动粘贴
+
+```bash
+sudo apt install ydotool wl-clipboard
+```
+
+在 `config.yaml` 中设置：
+```yaml
+input:
+  method: "clipboard"
+```
+
+启动时使用 `sudo -E`（保留 PipeWire 音频环境）：
+```bash
+sudo -E venv/bin/voice-input
+```
+
+**终端中无法粘贴**：程序会自动检测焦点窗口，终端使用 Ctrl+Shift+V，其他应用使用 Ctrl+V。
+
+**X11 用户**：
+```bash
+sudo apt install xdotool
+```
+在 `config.yaml` 设置 `method: "xdotool"`。
 
 ### 讯飞 API 错误
 
@@ -219,7 +237,8 @@ voice-input/
 │   ├── config.py            # 配置管理
 │   ├── recorder.py          # 录音模块（流式）
 │   ├── hotkey.py            # 快捷键监听
-│   ├── typer.py             # 文本输入（支持X11/Wayland）
+│   ├── typer.py             # 文本输入（支持终端/X11/Wayland）
+│   ├── portal.py            # RemoteDesktop Portal D-Bus 直接输入
 │   ├── sound.py             # 音效反馈
 │   └── recognizer/          # 语音识别后端
 │       └── xunfei.py        # 讯飞流式识别
