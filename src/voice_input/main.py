@@ -298,6 +298,11 @@ def main():
         action="version",
         version="%(prog)s 0.2.0",
     )
+    parser.add_argument(
+        "--tray",
+        action="store_true",
+        help="在系统托盘显示图标（需要 AyatanaAppIndicator3）",
+    )
 
     args = parser.parse_args()
 
@@ -324,6 +329,12 @@ def main():
 
     # 运行应用
     app = StreamingVoiceInput(config)
+
+    if args.tray:
+        from voice_input.tray import TrayIcon
+        tray = TrayIcon(app)
+        tray.start_in_thread()
+
     app.run()
 
 
