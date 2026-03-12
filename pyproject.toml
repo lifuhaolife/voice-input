@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "voice-input"
-version = "0.2.0"
+version = "0.3.0"
 description = "流式语音输入工具 - 支持讯飞/腾讯/百度云API"
 readme = "README.md"
 requires-python = ">=3.10"
