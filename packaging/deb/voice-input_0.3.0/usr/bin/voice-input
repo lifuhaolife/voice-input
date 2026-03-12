@@ -1,0 +1,12 @@
+#!/bin/bash
+# voice-input launcher
+
+VENV=/opt/voice-input/venv
+
+# 检查是否需要 sudo（访问 /dev/input 需要 input 组或 root）
+if [ -r /dev/input/event0 ] || [ "$(id -u)" -eq 0 ]; then
+    exec "$VENV/bin/voice-input" "$@"
+else
+    echo "需要 sudo 权限访问输入设备（或重新登录使 input 组生效）"
+    exec sudo -E "$VENV/bin/voice-input" "$@"
+fi

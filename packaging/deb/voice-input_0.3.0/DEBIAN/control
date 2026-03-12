@@ -1,0 +1,15 @@
+Package: voice-input
+Version: 0.3.0
+Architecture: all
+Maintainer: lifuhaolife <lifuhaolife@github.com>
+Depends: python3 (>= 3.10), python3-pip, python3-venv,
+ python3-gi, gir1.2-gtk-3.0,
+ gir1.2-ayatana-appindicator3-0.1,
+ wl-clipboard, ydotool,
+ libportaudio2
+Recommends: libdbus-1-dev
+Description: 流式语音输入工具 - 支持讯飞/腾讯/百度云 API
+ 按住快捷键录音，松开自动识别并输入文字。
+ 支持 GNOME Wayland、X11 等桌面环境。
+ 支持讯飞、腾讯云、百度云语音识别后端。
+ 支持系统托盘图标（--tray 参数）。

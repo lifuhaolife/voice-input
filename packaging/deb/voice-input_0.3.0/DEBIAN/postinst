@@ -1,0 +1,49 @@
+#!/bin/bash
+set -e
+
+INSTALL_DIR=/opt/voice-input
+VENV_DIR="$INSTALL_DIR/venv"
+WHEEL="$INSTALL_DIR/voice_input-0.3.0-py3-none-any.whl"
+
+echo ">>> 正在安装 voice-input..."
+
+# 1. 创建 Python 虚拟环境并安装包
+echo "    创建虚拟环境..."
+python3 -m venv "$VENV_DIR"
+echo "    安装 Python 依赖..."
+"$VENV_DIR/bin/pip" install --quiet --upgrade pip
+"$VENV_DIR/bin/pip" install --quiet "$WHEEL"
+
+# 2. 为每个已登录用户创建默认配置
+for HOME_DIR in /home/*/; do
+    USERNAME=$(basename "$HOME_DIR")
+    CONFIG_DIR="$HOME_DIR/.config/voice-input"
+    CONFIG_FILE="$CONFIG_DIR/config.yaml"
+    if [ ! -f "$CONFIG_FILE" ]; then
+        mkdir -p "$CONFIG_DIR"
+        cp /etc/voice-input/config.yaml.example "$CONFIG_FILE"
+        chown -R "$USERNAME":"$USERNAME" "$CONFIG_DIR" 2>/dev/null || true
+        echo "    已为 $USERNAME 创建配置文件: $CONFIG_FILE"
+    fi
+done
+
+# 3. 将用户加入 input 组（evdev 热键需要）
+REAL_USER="${SUDO_USER:-}"
+if [ -n "$REAL_USER" ] && id "$REAL_USER" &>/dev/null; then
+    if ! groups "$REAL_USER" | grep -q '\binput\b'; then
+        usermod -a -G input "$REAL_USER"
+        echo "    已将 $REAL_USER 加入 input 组（重新登录后生效）"
+    fi
+fi
+
+echo ""
+echo "✅ voice-input 安装完成！"
+echo ""
+echo "   首次使用前，请编辑配置文件填入 API 密钥："
+echo "   ~/.config/voice-input/config.yaml"
+echo ""
+echo "   运行方式："
+echo "     voice-input          # 命令行前台运行"
+echo "     voice-input --tray   # 带系统托盘图标"
+echo ""
+echo "   ⚠️  如果热键无响应，请重新登录使 input 组权限生效。"

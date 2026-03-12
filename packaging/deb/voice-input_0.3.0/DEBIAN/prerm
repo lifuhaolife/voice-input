@@ -1,0 +1,10 @@
+#!/bin/bash
+set -e
+
+echo ">>> 正在卸载 voice-input..."
+
+# 删除虚拟环境
+if [ -d /opt/voice-input/venv ]; then
+    rm -rf /opt/voice-input/venv
+    echo "    已删除虚拟环境"
+fi
