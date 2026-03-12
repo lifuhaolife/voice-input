@@ -6,8 +6,6 @@ import pwd
 import subprocess
 import time
 
-import pyperclip
-
 logger = logging.getLogger(__name__)
 
 
@@ -200,6 +198,12 @@ class TextInput:
             "wezterm", "st", "sakura", "xfce4-terminal",
         }
         try:
+            env = os.environ.copy()
+            if os.geteuid() == 0:
+                sudo_user = os.environ.get('SUDO_USER', '')
+                if sudo_user:
+                    uid = pwd.getpwnam(sudo_user).pw_uid
+                    env['DBUS_SESSION_BUS_ADDRESS'] = f'unix:path=/run/user/{uid}/bus'
             result = subprocess.run(
                 [
                     "gdbus", "call", "--session",
@@ -208,7 +212,7 @@ class TextInput:
                     "--method", "org.gnome.Shell.Eval",
                     "global.display.focus_window?.get_wm_class() ?? ''",
                 ],
-                capture_output=True, text=True, timeout=2,
+                capture_output=True, text=True, timeout=2, env=env,
             )
             if result.returncode == 0:
                 wm_class = result.stdout.lower()
@@ -377,6 +381,7 @@ class TextInput:
             from pynput.keyboard import Controller, Key
 
             logger.debug("使用剪贴板方式输入文字...")
+            import pyperclip  # optional dependency
             pyperclip.copy(text)
 
             time.sleep(0.1)

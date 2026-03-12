@@ -6,6 +6,16 @@ PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
 echo "安装语音输入工具..."
 
+# 0. 安装系统依赖
+echo "检查并安装系统依赖..."
+sudo apt-get install -y \
+    python3-gi \
+    gir1.2-gtk-3.0 \
+    gir1.2-ayatana-appindicator3-0.1 \
+    wl-clipboard \
+    ydotool \
+    2>/dev/null || echo "⚠️  部分系统包安装失败，请手动安装"
+
 # 1. 创建符号链接到 /usr/local/bin
 sudo ln -sf "$PROJECT_DIR/scripts/voice-input.sh" /usr/local/bin/voice-input
 
@@ -25,7 +35,8 @@ echo "✅ 安装完成！"
 echo ""
 echo "使用方法:"
 echo "  1. 命令行运行: voice-input"
-echo "  2. 应用菜单搜索: 语音输入"
-echo "  3. 快捷键: 按住 Alt 键录音，松开识别"
+echo "  2. 带系统托盘图标: voice-input --tray"
+echo "  3. 应用菜单搜索: 语音输入"
+echo "  4. 快捷键: 按住 Alt 键录音，松开识别"
 echo ""
 echo "首次使用请重新登录以获取 input 组权限"
