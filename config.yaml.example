@@ -1,0 +1,41 @@
+# Voice Input Configuration
+# 流式语音输入配置
+
+# 语音识别后端
+backend: xunfei
+
+# 快捷键设置
+hotkey:
+  trigger: "alt_r"
+  mode: "hold"
+
+# 录音设置
+recording:
+  sample_rate: 16000
+  channels: 1
+  chunk_ms: 40
+  max_duration: 30
+
+# 讯飞语音识别配置
+xunfei:
+  app_id: "YOUR_APP_ID"
+  api_key: "YOUR_API_KEY"
+  api_secret: "YOUR_API_SECRET"
+  language: "zh_cn"
+  accent: "mandarin"
+  vad_eos: 60000
+
+# 音效反馈
+sound:
+  enabled: false
+
+# 文本输入设置
+input:
+  method: "clipboard"
+  type_delay: 0.005
+
+# 日志设置
+logging:
+  level: "info"
+  show_audio_chunks: false
+  show_recognized_text: false
