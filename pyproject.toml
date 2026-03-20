@@ -44,7 +44,7 @@ dev = [
 ]
 
 [project.scripts]
-voice-input = "voice_input.main:main"
+voice-input = "voice_input.run:main"
 
 [project.urls]
 Homepage = "https://github.com/lifuhaolife/voice-input"

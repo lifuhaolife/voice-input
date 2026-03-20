@@ -3,6 +3,7 @@
 import logging
 import os
 import pwd
+import shutil
 import subprocess
 import time
 
@@ -23,6 +24,7 @@ class TextInput:
         """
         self.method = method
         self.type_delay = type_delay
+        self._tool_cache: dict[str, bool] = {}
 
     def input_text(self, text: str) -> bool:
         """Input text at current cursor position.
@@ -109,51 +111,25 @@ class TextInput:
 
     def _check_wl_copy(self) -> bool:
         """Check if wl-copy is available (Wayland clipboard)."""
-        try:
-            result = subprocess.run(
-                ["which", "wl-copy"],
-                capture_output=True,
-                text=True,
-            )
-            return result.returncode == 0
-        except Exception:
-            return False
+        return self._tool_available("wl-copy")
 
     def _check_wtype(self) -> bool:
         """Check if wtype is available (Wayland native)."""
-        try:
-            result = subprocess.run(
-                ["which", "wtype"],
-                capture_output=True,
-                text=True,
-            )
-            return result.returncode == 0
-        except Exception:
-            return False
+        return self._tool_available("wtype")
 
     def _check_ydotool(self) -> bool:
         """Check if ydotool is available."""
-        try:
-            result = subprocess.run(
-                ["which", "ydotool"],
-                capture_output=True,
-                text=True,
-            )
-            return result.returncode == 0
-        except Exception:
-            return False
+        return self._tool_available("ydotool")
 
     def _check_xdotool(self) -> bool:
         """Check if xdotool is available."""
-        try:
-            result = subprocess.run(
-                ["which", "xdotool"],
-                capture_output=True,
-                text=True,
-            )
-            return result.returncode == 0
-        except Exception:
-            return False
+        return self._tool_available("xdotool")
+
+    def _tool_available(self, tool: str) -> bool:
+        """缓存工具可用性判断，避免重复 spawn."""
+        if tool not in self._tool_cache:
+            self._tool_cache[tool] = shutil.which(tool) is not None
+        return self._tool_cache[tool]
 
     # --- Input methods ---
 
@@ -170,7 +146,7 @@ class TextInput:
                 self._user_cmd_prefix(wayland=True) + ["wl-copy", "--", text],
                 capture_output=True,
                 text=True,
-                timeout=5,
+                timeout=0.5,
             )
 
             if result.returncode != 0:
@@ -185,7 +161,7 @@ class TextInput:
                 ["ydotool", "key", "ctrl+v"],
                 capture_output=True,
                 text=True,
-                timeout=5,
+                timeout=0.5,
             )
 
             if result.returncode == 0:
@@ -231,7 +207,7 @@ class TextInput:
                 self._user_cmd_prefix(wayland=True) + ["wl-copy", "--", text],
                 capture_output=True,
                 text=True,
-                timeout=5,
+                timeout=0.5,
             )
 
             if result.returncode != 0:
@@ -245,7 +221,7 @@ class TextInput:
                 self._user_cmd_prefix(wayland=True) + ["wtype", "-M", "ctrl", "v", "-m", "ctrl"],
                 capture_output=True,
                 text=True,
-                timeout=5,
+                timeout=0.5,
             )
 
             if result.returncode == 0:
@@ -355,14 +331,6 @@ class TextInput:
             deps["pyperclip"] = False
 
         for tool in ["wtype", "ydotool", "xdotool", "wl-copy"]:
-            try:
-                result = subprocess.run(
-                    ["which", tool],
-                    capture_output=True,
-                    text=True,
-                )
-                deps[tool] = result.returncode == 0
-            except Exception:
-                deps[tool] = False
+            deps[tool] = shutil.which(tool) is not None
 
         return deps

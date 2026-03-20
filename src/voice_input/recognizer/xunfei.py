@@ -29,7 +29,8 @@ class XunfeiStreamer:
         language: str = "zh_cn",
         accent: str = "mandarin",
         on_result: Optional[Callable[[str, bool], None]] = None,
-        vad_eos: int = 5000,
+        vad_eos: int = 60000,  # 60 秒，支持长语音  # 语音结束静默时长 (毫秒)，默认 10 秒，防止提前结束
+        max_audio_queue_size: int = 400,
     ):
         """初始化讯飞流式识别器
 
@@ -55,10 +56,14 @@ class XunfeiStreamer:
         self._result_text = ""
         self._result_parts: list[str] = []  # 用于动态修正
         self._running = False
-        self._user_stopped = False  # 用户主动停止标志，不受服务端影响
-        self._server_final = False  # 服务端已返回最终结果
+        self._user_stopped = True
+        self._user_stopped = False
+        self._server_final = False
         self._connected = False
         self._thread: Optional[threading.Thread] = None
+        self._heartbeat_thread: Optional[threading.Thread] = None
+        self._last_activity = time.time()
+        self._max_audio_queue_size = max_audio_queue_size
 
     def _create_url(self) -> str:
         """生成鉴权URL"""
@@ -143,11 +148,13 @@ class XunfeiStreamer:
     def _on_error(self, ws, error):
         logger.error(f"WebSocket错误: {error}")
         self._running = False
+        self._user_stopped = True
 
     def _on_close(self, ws, close_status_code, close_msg):
         logger.debug(f"WebSocket关闭: {close_status_code} {close_msg}")
         self._connected = False
         self._running = False
+        self._user_stopped = True
 
     def _on_open(self, ws):
         """连接建立，发送首帧"""
@@ -164,6 +171,7 @@ class XunfeiStreamer:
                 "accent": self.accent,
                 "dwa": "wpgs",  # 开启动态修正
                 "vad_eos": self.vad_eos,  # 语音结束静默时长(毫秒)
+                "pd": "result",  # 不启用服务端 VAD，由用户控制结束
             },
             "data": {
                 "status": 0,  # 首帧
@@ -179,10 +187,10 @@ class XunfeiStreamer:
         self._thread.start()
 
     def _send_audio_loop(self):
-        """音频发送循环"""
-        while not self._user_stopped:
+        """音频发送循环 - 优化 CPU 占用"""
+        while self._running and not self._user_stopped:
             try:
-                audio_chunk = self._audio_queue.get(timeout=0.1)
+                audio_chunk = self._audio_queue.get(timeout=0.5)
                 if audio_chunk is None:
                     # 结束信号，发送结束帧
                     if self._ws and self._connected:
@@ -203,6 +211,7 @@ class XunfeiStreamer:
                         }
                     }
                     self._ws.send(json.dumps(frame))
+                    self._last_activity = time.time()
 
             except queue.Empty:
                 continue
@@ -224,6 +233,11 @@ class XunfeiStreamer:
 
         try:
             url = self._create_url()
+            queue_kwargs = {}
+            if self._max_audio_queue_size > 0:
+                queue_kwargs["maxsize"] = self._max_audio_queue_size
+            self._audio_queue = queue.Queue(**queue_kwargs)
+
             self._ws = websocket.WebSocketApp(
                 url,
                 on_open=self._on_open,
@@ -256,7 +270,17 @@ class XunfeiStreamer:
             audio_data: PCM音频数据 (16kHz, 16bit, mono)
         """
         if not self._user_stopped:
-            self._audio_queue.put(audio_data)
+            try:
+                self._audio_queue.put_nowait(audio_data)
+            except queue.Full:
+                logger.warning("音频队列已满，丢弃最旧的一块数据并尝试重新入队")
+                try:
+                    self._audio_queue.get_nowait()
+                    self._audio_queue.put_nowait(audio_data)
+                except queue.Empty:
+                    logger.debug("音频队列空了，当前块被忽略")
+                except queue.Full:
+                    logger.debug("连续丢弃失败，当前块未入队")
 
     def stop(self) -> str:
         """停止识别，返回最终结果

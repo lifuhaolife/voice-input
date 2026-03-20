@@ -196,6 +196,7 @@ class StreamingRecorder:
         channels: int = 1,
         chunk_ms: int = 40,
         on_chunk: Optional[Callable[[bytes], None]] = None,
+        retain_audio: bool = False,
     ):
         """初始化流式录音器
 
@@ -209,6 +210,7 @@ class StreamingRecorder:
         self.channels = channels
         self.chunk_ms = chunk_ms
         self.on_chunk = on_chunk
+        self._retain_audio = retain_audio
 
         # 计算每块采样数 (40ms @ 16kHz = 640 samples)
         self.chunk_size = int(sample_rate * chunk_ms / 1000)
@@ -228,8 +230,9 @@ class StreamingRecorder:
         if not self._is_recording:
             return
 
-        with self._lock:
-            self._audio_buffer.append(indata.copy())
+        if self._retain_audio:
+            with self._lock:
+                self._audio_buffer.append(indata.copy())
 
         # 转换为PCM字节并发送
         if self.on_chunk:
@@ -249,8 +252,9 @@ class StreamingRecorder:
 
         logger.info(f"开始流式录音: {self.sample_rate}Hz, 块大小{self.chunk_ms}ms")
 
-        with self._lock:
-            self._audio_buffer = []
+        if self._retain_audio:
+            with self._lock:
+                self._audio_buffer = []
 
         self._is_recording = True
 
@@ -287,6 +291,9 @@ class StreamingRecorder:
             self._stream.stop()
             self._stream.close()
             self._stream = None
+
+        if not self._retain_audio:
+            return None
 
         with self._lock:
             if not self._audio_buffer:
