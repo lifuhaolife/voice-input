@@ -1,0 +1,32 @@
+# 编译产物
+/target/
+**/target/
+
+# 构建产物
+**/*.so
+**/*.dylib
+**/*.dll
+
+# 调试信息
+**/*.pdb
+
+# 配置文件（包含敏感信息）
+config.yaml
+
+# 日志文件
+*.log
+/tmp/voice-input*.log
+
+# 锁文件
+Cargo.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# 系统文件
+.DS_Store
+Thumbs.db
