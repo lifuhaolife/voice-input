@@ -45,6 +45,7 @@ uinput = "0.1"
 # 错误处理
 anyhow = "1.0"
 thiserror = "1.0"
+libc = "0.2"
 
 # 剪贴板
 arboard = "3.3"
