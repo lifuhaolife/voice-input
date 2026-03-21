@@ -3,7 +3,7 @@
 use chrono::Local;
 use log::{LevelFilter, Metadata, Record};
 use std::fs::{File, OpenOptions};
-use std::io::{self, Write};
+use std::io::{Write};
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -15,7 +15,7 @@ pub struct Logger {
 
 impl Logger {
     /// 初始化日志器
-    pub fn init(log_file: Option<PathBuf>, level: &str) -> io::Result<()> {
+    pub fn init(log_file: Option<PathBuf>, level: &str) -> std::io::Result<()> {
         let level_filter = match level.to_lowercase().as_str() {
             "debug" => LevelFilter::Debug,
             "info" => LevelFilter::Info,
@@ -44,7 +44,7 @@ impl Logger {
         
         log::set_boxed_logger(logger)
             .map(|()| log::set_max_level(level_filter))
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
         
         Ok(())
     }
@@ -71,27 +71,21 @@ impl log::Log for Logger {
                 record.args()
             );
             
-            // 输出到控制台
             eprintln!("{}", message);
             
-            // 输出到文件
-            if let Some(ref file_mutex) = self.file {
-                if let Ok(mut file_opt) = file_mutex.lock() {
-                    if let Some(file) = file_opt.as_mut() {
-                        let _ = writeln!(file, "{}", message);
-                        let _ = file.flush();
-                    }
+            if let Ok(mut file_opt) = self.file.lock() {
+                if let Some(file) = file_opt.as_mut() {
+                    let _ = writeln!(file, "{}", message);
+                    let _ = file.flush();
                 }
             }
         }
     }
     
     fn flush(&self) {
-        if let Some(ref file_mutex) = self.file {
-            if let Ok(mut file_opt) = file_mutex.lock() {
-                if let Some(file) = file_opt.as_mut() {
-                    let _ = file.flush();
-                }
+        if let Ok(mut file_opt) = self.file.lock() {
+            if let Some(file) = file_opt.as_mut() {
+                let _ = file.flush();
             }
         }
     }

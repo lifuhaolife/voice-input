@@ -58,13 +58,13 @@ impl HotkeyListener {
     fn find_keyboard_devices() -> Vec<Device> {
         let mut devices = Vec::new();
         
-        for (_, device) in evdev::enumerate() {
-            if let Ok(keys) = device.get_supported_keys() {
-                if keys.contains(&Key::KEY_LEFTALT) || keys.contains(&Key::KEY_RIGHTALT) {
-                    if let Ok(name) = device.name() {
-                        info!("找到键盘设备：{}", name);
-                        devices.push(device);
-                    }
+        for (_, mut device) in evdev::enumerate() {
+            // 检查设备名称是否包含键盘相关关键字
+            if let Some(name) = device.name() {
+                let name_lower = name.to_lowercase();
+                if name_lower.contains("keyboard") || name_lower.contains("alt") {
+                    info!("找到键盘设备：{}", name);
+                    devices.push(device);
                 }
             }
         }
@@ -78,7 +78,7 @@ impl HotkeyListener {
             return Ok(());
         }
         
-        let devices = Self::find_keyboard_devices();
+        let mut devices = Self::find_keyboard_devices();
         if devices.is_empty() {
             return Err(anyhow::anyhow!("未找到键盘设备"));
         }
@@ -96,7 +96,7 @@ impl HotkeyListener {
             let mut hotkey_pressed = false;
             
             while is_running.load(Ordering::SeqCst) {
-                for device in &mut devices.iter() {
+                for device in devices.iter_mut() {
                     if let Ok(events) = device.fetch_events() {
                         for event in events {
                             let key = Key::new(event.code());

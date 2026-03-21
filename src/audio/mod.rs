@@ -2,12 +2,10 @@
 
 use anyhow::{Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::Device;
 use log::{error, info};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::sync::mpsc::{self, Sender, Receiver};
-use std::thread;
 
 /// 音频数据块
 pub type AudioChunk = Vec<i16>;
@@ -21,7 +19,6 @@ pub struct StreamingRecorder {
     rx: Option<Receiver<AudioChunk>>,
     is_recording: Arc<AtomicBool>,
     stop_flag: Arc<AtomicBool>,
-    thread: Option<thread::JoinHandle<()>>,
 }
 
 impl StreamingRecorder {
@@ -38,7 +35,6 @@ impl StreamingRecorder {
             rx: Some(rx),
             is_recording: Arc::new(AtomicBool::new(false)),
             stop_flag: Arc::new(AtomicBool::new(false)),
-            thread: None,
         }
     }
     
@@ -83,44 +79,40 @@ impl StreamingRecorder {
         
         let err_fn = |err| error!("音频流错误：{}", err);
         
-        let stream = match config.sample_format() {
-            cpal::SampleFormat::I16 => device.build_input_stream(
-                &config.into(),
-                move |data: &[i16], _: &cpal::InputCallbackInfo| {
-                    if is_recording.load(Ordering::SeqCst) {
-                        let _ = tx.send(data.to_vec());
-                    }
-                },
-                err_fn,
-                None,
-            )?,
-            cpal::SampleFormat::F32 => device.build_input_stream(
-                &config.into(),
-                move |data: &[f32], _: &cpal::InputCallbackInfo| {
-                    if is_recording.load(Ordering::SeqCst) {
-                        let samples: Vec<i16> = data.iter()
-                            .map(|&s| (s * 32767.0) as i16)
-                            .collect();
-                        let _ = tx.send(samples);
-                    }
-                },
-                err_fn,
-                None,
-            )?,
+        // 使用 cpal 的 Stream 会自动在后台运行
+        match config.sample_format() {
+            cpal::SampleFormat::I16 => {
+                let stream = device.build_input_stream(
+                    &config.into(),
+                    move |data: &[i16], _: &cpal::InputCallbackInfo| {
+                        if is_recording.load(Ordering::SeqCst) {
+                            let _ = tx.send(data.to_vec());
+                        }
+                    },
+                    err_fn,
+                    None,
+                )?;
+                stream.play()?;
+                // Stream 会被自动管理，不需要保存
+            }
+            cpal::SampleFormat::F32 => {
+                let stream = device.build_input_stream(
+                    &config.into(),
+                    move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                        if is_recording.load(Ordering::SeqCst) {
+                            let samples: Vec<i16> = data.iter()
+                                .map(|&s| (s * 32767.0) as i16)
+                                .collect();
+                            let _ = tx.send(samples);
+                        }
+                    },
+                    err_fn,
+                    None,
+                )?;
+                stream.play()?;
+            }
             _ => return Err(anyhow::anyhow!("不支持的采样格式")),
         };
-        
-        stream.play()?;
-        
-        // 保存 stream 在线程中
-        let handle = thread::spawn(move || {
-            while !stop_flag.load(Ordering::SeqCst) {
-                std::thread::sleep(std::time::Duration::from_millis(100));
-            }
-            drop(stream);
-        });
-        
-        self.thread = Some(handle);
         
         Ok(())
     }
@@ -129,9 +121,6 @@ impl StreamingRecorder {
     pub fn stop(&mut self) {
         self.is_recording.store(false, Ordering::SeqCst);
         self.stop_flag.store(true, Ordering::SeqCst);
-        if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
-        }
         info!("录音已停止");
     }
     
