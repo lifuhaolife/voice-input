@@ -18,7 +18,8 @@ recording:
   sample_rate: 16000
   channels: 1
   # 每块音频时长(毫秒)，用于流式传输
-  chunk_ms: 40
+  # 建议: 80-160ms 可降低 CPU 占用，40ms 延迟最低但 CPU 占用高
+  chunk_ms: 80
   # 最长录音时长(秒)
   max_duration: 30
 
@@ -34,6 +35,10 @@ xunfei:
   accent: "mandarin"
   # 语音结束静默时长(毫秒), 越大支持越长的停顿, 默认5000
   vad_eos: 5000
+  # 音频队列最大长度，0 表示无限制
+  max_audio_queue_size: 400
+  # 批量发送音频块数量，增大可降低 CPU 占用（建议 4-8）
+  batch_chunks: 4
 
 # 腾讯语音识别配置 (备选)
 # 获取方式: https://console.cloud.tencent.com/asr

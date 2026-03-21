@@ -3,6 +3,7 @@
 import logging
 import os
 import threading
+import time
 from typing import Callable
 
 logger = logging.getLogger(__name__)
@@ -208,6 +209,9 @@ class HotkeyListener:
                         continue
                     except Exception as e:
                         logger.debug(f"Error reading from {dev.name}: {e}")
+                
+                # 避免 CPU 100% 占用，10ms 延迟对快捷键响应无影响
+                time.sleep(0.01)
                         
             except Exception as e:
                 logger.error(f"Error in event loop: {e}")

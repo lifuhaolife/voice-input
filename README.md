@@ -117,12 +117,14 @@ recording:
   max_duration: 30    # 最长录音时长(秒)
 
 # 讯飞语音识别配置
-xunfei:
-  app_id: ""
-  api_key: ""
-  api_secret: ""
-  language: "zh_cn"   # zh_cn(中文), en_us(英文)
-  accent: "mandarin"  # mandarin(普通话), cantonese(粤语)
+  xunfei:
+    app_id: ""
+    api_key: ""
+    api_secret: ""
+    language: "zh_cn"   # zh_cn(中文), en_us(英文)
+    accent: "mandarin"  # mandarin(普通话), cantonese(粤语)
+    max_audio_queue_size: 400  # 流式识别发送队列最大长度
+    batch_chunks: 2  # 每次向讯飞发送的音频块数量（>1 可减少 CPU 负载）
 
 # 音效反馈
 sound:

@@ -28,6 +28,8 @@ class Config:
             "api_secret": "",
             "language": "zh_cn",
             "accent": "mandarin",
+            "max_audio_queue_size": 400,
+            "batch_chunks": 2,
         },
         "tencent": {
             "app_id": "",

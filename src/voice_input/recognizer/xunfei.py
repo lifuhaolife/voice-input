@@ -31,6 +31,7 @@ class XunfeiStreamer:
         on_result: Optional[Callable[[str, bool], None]] = None,
         vad_eos: int = 60000,  # 60 秒，支持长语音  # 语音结束静默时长 (毫秒)，默认 10 秒，防止提前结束
         max_audio_queue_size: int = 400,
+        batch_chunks: int = 2,
     ):
         """初始化讯飞流式识别器
 
@@ -64,6 +65,7 @@ class XunfeiStreamer:
         self._heartbeat_thread: Optional[threading.Thread] = None
         self._last_activity = time.time()
         self._max_audio_queue_size = max_audio_queue_size
+        self.batch_chunks = max(1, batch_chunks)
 
     def _create_url(self) -> str:
         """生成鉴权URL"""
@@ -182,41 +184,78 @@ class XunfeiStreamer:
         }
         ws.send(json.dumps(frame))
 
-        # 启动音频发送线程
-        self._thread = threading.Thread(target=self._send_audio_loop, daemon=True)
-        self._thread.start()
+        # 启动音频发送线程（只在这里启动一次）
+        if not self._thread or not self._thread.is_alive():
+            self._thread = threading.Thread(target=self._send_audio_loop, daemon=True)
+            self._thread.start()
 
     def _send_audio_loop(self):
-        """音频发送循环 - 优化 CPU 占用"""
+        """音频发送循环 - 批量编码，减少 base64/json 次数"""
+        batch_buffer = bytearray()
+        chunks_in_batch = 0
+
         while self._running and not self._user_stopped:
             try:
                 audio_chunk = self._audio_queue.get(timeout=0.5)
                 if audio_chunk is None:
-                    # 结束信号，发送结束帧
+                    if batch_buffer:
+                        self._send_audio_frame(bytes(batch_buffer))
+                        batch_buffer.clear()
+                        chunks_in_batch = 0
                     if self._ws and self._connected:
                         frame = {"data": {"status": 2, "audio": ""}}
                         self._ws.send(json.dumps(frame))
                         logger.debug("发送结束帧")
+                        self._last_activity = time.time()
                     break
 
-                if self._ws and self._connected:
-                    # 发送中间帧
-                    audio_b64 = base64.b64encode(audio_chunk).decode()
-                    frame = {
-                        "data": {
-                            "status": 1,
-                            "format": "audio/L16;rate=16000",
-                            "encoding": "raw",
-                            "audio": audio_b64,
-                        }
-                    }
-                    self._ws.send(json.dumps(frame))
-                    self._last_activity = time.time()
+                batch_buffer.extend(audio_chunk)
+                chunks_in_batch += 1
+
+                if chunks_in_batch >= self.batch_chunks:
+                    self._send_audio_frame(bytes(batch_buffer))
+                    batch_buffer.clear()
+                    chunks_in_batch = 0
 
             except queue.Empty:
                 continue
             except Exception as e:
                 logger.error(f"发送音频失败: {e}")
+                break
+
+        # 如果线程退出但还有残留数据，尝试发送
+        if batch_buffer:
+            self._send_audio_frame(bytes(batch_buffer))
+
+    def _send_audio_frame(self, audio_bytes: bytes, status: int = 1):
+        """统一生成帧并发送，避免重复编码逻辑"""
+        if not audio_bytes or not self._ws or not self._connected:
+            return
+
+        audio_b64 = base64.b64encode(audio_bytes).decode()
+        frame = {
+            "data": {
+                "status": status,
+                "format": "audio/L16;rate=16000",
+                "encoding": "raw",
+                "audio": audio_b64,
+            }
+        }
+        self._ws.send(json.dumps(frame))
+        self._last_activity = time.time()
+
+    def reset(self):
+        """重置识别状态，准备新的识别会话（复用连接）"""
+        self._result_text = ""
+        self._result_parts = []
+        self._user_stopped = False
+        self._server_final = False
+        
+        # 清空音频队列
+        while not self._audio_queue.empty():
+            try:
+                self._audio_queue.get_nowait()
+            except queue.Empty:
                 break
 
     def start(self) -> bool:
@@ -225,11 +264,18 @@ class XunfeiStreamer:
         Returns:
             是否成功启动
         """
+        # 重置状态
         self._result_text = ""
         self._result_parts = []
-        self._audio_queue = queue.Queue()
         self._user_stopped = False
         self._server_final = False
+        
+        # 清空音频队列
+        while not self._audio_queue.empty():
+            try:
+                self._audio_queue.get_nowait()
+            except queue.Empty:
+                break
 
         try:
             url = self._create_url()
@@ -299,6 +345,7 @@ class XunfeiStreamer:
 
         if self._ws:
             self._ws.close()
+            self._connected = False
 
         return self._result_text
 

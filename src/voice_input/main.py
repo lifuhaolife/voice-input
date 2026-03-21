@@ -134,6 +134,8 @@ class StreamingVoiceInput:
                 accent=self.config.xunfei.get("accent", "mandarin"),
                 on_result=self._on_result,
                 vad_eos=self.config.xunfei.get("vad_eos", 5000),
+                max_audio_queue_size=self.config.xunfei.get("max_audio_queue_size", 400),
+                batch_chunks=self.config.xunfei.get("batch_chunks", 2),
             )
         else:
             logger.error(f"不支持的后端: {backend}")
@@ -146,6 +148,8 @@ class StreamingVoiceInput:
             return
 
         # 开始录音
+        self._is_recording = True
+        self.recorder.start()
         self._is_recording = True
         self.recorder.start()
 
