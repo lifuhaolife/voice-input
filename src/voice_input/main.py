@@ -158,7 +158,6 @@ class StreamingVoiceInput:
         if not self._is_recording:
             return
 
-        logger.info("停止录音...")
         self._is_recording = False
 
         # 停止录音
@@ -173,11 +172,11 @@ class StreamingVoiceInput:
             self.streamer = None
 
             if final_text:
-                logger.info(f"识别结果: {final_text}")
+                logger.info(f"✅ {final_text}")
                 success = self.text_input.input_text(final_text)
                 if not success:
-                    logger.error("文字输入失败，请检查输入方式配置")
-                    print(f"\033[31m❌ 输入失败，文字内容: {final_text}\033[0m")
+                    logger.error("文字输入失败")
+                    print(f"\033[31m❌ 输入失败: {final_text}\033[0m")
             else:
                 logger.warning("未识别到文字")
 
