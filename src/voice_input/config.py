@@ -50,7 +50,7 @@ class Config:
             "show_result": False,
         },
         "input": {
-            "method": "clipboard",
+            "method": "xdotool",
             "type_delay": 0.005,
         },
         "logging": {
