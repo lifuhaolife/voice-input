@@ -25,12 +25,14 @@ class TextInput:
         self.method = method
         self.type_delay = type_delay
         self._tool_cache: dict[str, bool] = {}
+        self._focus_window = None  # 目标窗口 ID
 
-    def input_text(self, text: str) -> bool:
+    def input_text(self, text: str, focus_window: str = None) -> bool:
         """Input text at current cursor position.
 
         Args:
             text: Text to input.
+            focus_window: Target window ID for xdotool (optional).
 
         Returns:
             True if successful, False otherwise.
@@ -39,6 +41,10 @@ class TextInput:
             return False
 
         logger.info(f"准备输入文字: '{text[:20]}{'...' if len(text) > 20 else ''}'")
+        logger.info(f"配置的输入方法: {self.method}")
+        if focus_window:
+            logger.info(f"目标窗口: {focus_window}")
+            self._focus_window = focus_window
 
         # 根据配置的方法或自动检测选择输入方式
         methods = []
@@ -50,8 +56,16 @@ class TextInput:
             if self._check_wl_copy():
                 methods.append(("wl-clipboard", self._input_via_wl_clipboard))
             methods.append(("clipboard-pynput", self._input_via_clipboard))
-        elif self.method == "xdotool" and self._check_xdotool():
-            methods.append(("xdotool", self._input_via_xdotool))
+        elif self.method == "xdotool":
+            logger.info(f"xdotool 可用: {self._check_xdotool()}")
+            # Wayland 下使用 pynput 剪贴板粘贴（最可靠）
+            if os.environ.get('XDG_SESSION_TYPE') == 'wayland':
+                logger.info("检测到 Wayland，使用 pynput 剪贴板粘贴")
+                methods.append(("pynput-clipboard", self._input_via_clipboard))
+            elif self._check_xdotool():
+                methods.append(("xdotool", self._input_via_xdotool))
+            else:
+                logger.warning("xdotool 不可用，回退到自动检测")
         elif self.method == "ydotool" and self._check_ydotool():
             methods.append(("ydotool", self._input_via_ydotool))
         elif self.method == "wtype" and self._check_wtype():
@@ -74,6 +88,7 @@ class TextInput:
             methods.append(("pynput", self._input_via_keyboard))
 
         # 尝试每种方法，直到成功
+        logger.info(f"将尝试 {len(methods)} 种输入方法: {[m[0] for m in methods]}")
         for method_name, method_func in methods:
             logger.debug(f"尝试使用 {method_name} 输入文字...")
             try:
@@ -180,20 +195,36 @@ class TextInput:
     def _input_via_xdotool(self, text: str) -> bool:
         """Input text using xdotool (X11/XWayland, supports Unicode/Chinese)."""
         try:
-            logger.debug("使用 xdotool 输入文字...")
-            cmd = self._user_cmd_prefix(wayland=False) + [
-                "xdotool", "type", "--clearmodifiers", "--delay", "12", text,
-            ]
+            logger.info(f"使用 xdotool 输入文字，DISPLAY={os.environ.get('DISPLAY')}")
+            
+            # 如果有记住的焦点窗口，使用 --window 参数直接输入
+            if self._focus_window:
+                logger.info(f"直接向窗口 {self._focus_window} 输入")
+                cmd = self._user_cmd_prefix(wayland=False) + [
+                    "xdotool", "type", "--window", self._focus_window, 
+                    "--clearmodifiers", "--delay", "12", "--", text,
+                ]
+            else:
+                # 没有窗口信息，直接输入到当前焦点
+                cmd = self._user_cmd_prefix(wayland=False) + [
+                    "xdotool", "type", "--clearmodifiers", "--delay", "12", "--", text,
+                ]
+            
+            logger.info(f"执行命令: {' '.join(cmd)}")
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
                 timeout=30,
             )
+            logger.info(f"xdotool 返回码: {result.returncode}")
+            if result.stderr:
+                logger.warning(f"xdotool stderr: {result.stderr}")
+                
             if result.returncode == 0:
                 return True
             else:
-                logger.warning(f"xdotool 失败: {result.stderr}")
+                logger.warning(f"xdotool 失败 (返回码 {result.returncode})")
                 return False
         except Exception as e:
             logger.error(f"xdotool 输入失败: {e}")
@@ -311,6 +342,35 @@ class TextInput:
             return True
         except Exception as e:
             logger.error(f"剪贴板输入失败: {e}")
+            return False
+
+    def _input_via_clipboard_notify(self, text: str) -> bool:
+        """Copy to clipboard and notify user (for Wayland)."""
+        try:
+            logger.debug("使用 wl-copy 复制到剪贴板...")
+            result = subprocess.run(
+                ["wl-copy", "--", text],
+                capture_output=True,
+                text=True,
+                timeout=2,
+            )
+            if result.returncode == 0:
+                print(f"\n📋 文字已复制到剪贴板，请按 Ctrl+V 粘贴", flush=True)
+                logger.info("✅ 文字已复制到剪贴板")
+                return True
+            else:
+                logger.warning(f"wl-copy 失败: {result.stderr}")
+                # 回退到 pyperclip
+                pyperclip.copy(text)
+                print(f"\n📋 文字已复制到剪贴板，请按 Ctrl+V 粘贴", flush=True)
+                return True
+        except subprocess.TimeoutExpired:
+            logger.warning("wl-copy 超时，使用 pyperclip")
+            pyperclip.copy(text)
+            print(f"\n📋 文字已复制到剪贴板，请按 Ctrl+V 粘贴", flush=True)
+            return True
+        except Exception as e:
+            logger.error(f"剪贴板操作失败: {e}")
             return False
 
     @staticmethod

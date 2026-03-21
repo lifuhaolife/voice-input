@@ -61,8 +61,9 @@ sound:
 
 # 文本输入设置
 input:
-  # 输入方式: xdotool(X11/XWayland推荐) / wtype(Wayland) / clipboard(剪贴板)
-  method: "xdotool"
+  # 输入方式: clipboard(推荐) / xdotool(X11) / wtype(Wayland)
+  # 注意: GNOME Wayland 下只能使用 clipboard 方式
+  method: "clipboard"
   # 按键间隔(秒)
   type_delay: 0.005
 

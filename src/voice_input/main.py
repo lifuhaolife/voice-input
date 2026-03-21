@@ -4,6 +4,7 @@
 import argparse
 import logging
 import signal
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -66,6 +67,7 @@ class StreamingVoiceInput:
         self.streamer: Optional[XunfeiStreamer] = None
         self.current_text = ""
         self._is_recording = False
+        self._focus_window = None  # 记住焦点窗口用于输入
 
         # 快捷键监听器
         self.hotkey_listener: Optional[HotkeyListener] = None
@@ -116,6 +118,21 @@ class StreamingVoiceInput:
         """快捷键按下 - 开始录音"""
         if self._is_recording:
             return
+
+        # 记住当前焦点窗口（用于后续输入）
+        try:
+            result = subprocess.run(
+                ["xdotool", "getwindowfocus"],
+                capture_output=True,
+                text=True,
+                timeout=0.5
+            )
+            if result.returncode == 0:
+                self._focus_window = result.stdout.strip()
+                logger.debug(f"记住焦点窗口: {self._focus_window}")
+        except Exception as e:
+            logger.debug(f"无法获取焦点窗口: {e}")
+            self._focus_window = None
 
         print("\n🔴 开始录音，请说话...", flush=True)
         self.current_text = ""
@@ -173,7 +190,7 @@ class StreamingVoiceInput:
 
             if final_text:
                 logger.info(f"✅ {final_text}")
-                success = self.text_input.input_text(final_text)
+                success = self.text_input.input_text(final_text, self._focus_window)
                 if not success:
                     logger.error("文字输入失败")
                     print(f"\033[31m❌ 输入失败: {final_text}\033[0m")
