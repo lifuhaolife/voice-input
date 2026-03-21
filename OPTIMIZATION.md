@@ -66,7 +66,7 @@ python test_optimization.py
 
 ```bash
 # 启动程序
-voice-input -v
+lb-voice -v
 
 # 多次按住快捷键录音，观察：
 # 1. 第一次录音后，后续录音启动更快

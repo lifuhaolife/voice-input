@@ -17,15 +17,18 @@ done
 # 激活虚拟环境
 source venv/bin/activate
 
+# 锁文件路径（与 process_lock.py 保持一致）
+LOCK_FILE="$HOME/.local/share/voice-input/voice-input.lock"
+
 # 单例检查
-if [ -f /tmp/voice-input.lock ]; then
-    EXISTING_PID=$(cat /tmp/voice-input.lock 2>/dev/null)
+if [ -f "$LOCK_FILE" ]; then
+    EXISTING_PID=$(cat "$LOCK_FILE" 2>/dev/null)
     if [ -n "$EXISTING_PID" ] && kill -0 "$EXISTING_PID" 2>/dev/null; then
         echo "❌ 语音输入已在运行 (PID: $EXISTING_PID)"
         echo "   如需重启，请先运行：kill $EXISTING_PID"
         exit 1
     fi
-    rm -f /tmp/voice-input.lock
+    rm -f "$LOCK_FILE"
 fi
 
 # 构建命令
