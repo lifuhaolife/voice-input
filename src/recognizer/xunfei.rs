@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use chrono::Utc;
 use hmac::{Hmac, Mac};
-use log::{debug, error, info};
+use log::{error, info};
 use serde::Deserialize;
 use sha2::Sha256;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
-use tokio_tungstenite::{connect_async, WebSocketStream};
+use tokio_tungstenite::connect_async;
 use futures_util::{SinkExt, StreamExt};
 
 type HmacSha256 = Hmac<Sha256>;
@@ -33,7 +33,7 @@ pub struct XunfeiStreamer {
     language: String,
     accent: String,
     vad_eos: u64,
-    on_result: Box<dyn Fn(RecognitionResult) + Send + 'static>,
+    on_result: Arc<dyn Fn(RecognitionResult) + Send + Sync + 'static>,
     is_running: Arc<AtomicBool>,
     user_stopped: Arc<AtomicBool>,
     audio_tx: Option<Sender<Vec<u8>>>,
@@ -42,6 +42,7 @@ pub struct XunfeiStreamer {
 #[derive(Debug, Deserialize)]
 struct XunfeiResponse {
     code: i32,
+    #[allow(dead_code)]
     message: String,
     data: Option<XunfeiData>,
 }
@@ -79,7 +80,7 @@ impl XunfeiStreamer {
         on_result: F,
     ) -> Self
     where
-        F: Fn(RecognitionResult) + Send + 'static,
+        F: Fn(RecognitionResult) + Send + Sync + 'static,
     {
         XunfeiStreamer {
             app_id,
@@ -88,7 +89,7 @@ impl XunfeiStreamer {
             language,
             accent,
             vad_eos,
-            on_result: Box::new(on_result),
+            on_result: Arc::new(on_result),
             is_running: Arc::new(AtomicBool::new(false)),
             user_stopped: Arc::new(AtomicBool::new(false)),
             audio_tx: None,
@@ -101,16 +102,13 @@ impl XunfeiStreamer {
         let host = "iat-api.xfyun.cn";
         let path = "/v2/iat";
         
-        // 签名原始字符串
         let sig_origin = format!("host: {}\ndate: {}\nGET {} HTTP/1.1", host, date, path);
         
-        // 计算签名
         let mut mac = HmacSha256::new_from_slice(self.api_secret.as_bytes())
             .context("HMAC 初始化失败")?;
         mac.update(sig_origin.as_bytes());
         let signature = STANDARD.encode(mac.finalize().into_bytes());
         
-        // authorization
         let auth_origin = format!(
             "api_key=\"{}\", algorithm=\"hmac-sha256\", headers=\"host date request-line\", signature=\"{}\"",
             self.api_key, signature
@@ -128,14 +126,14 @@ impl XunfeiStreamer {
     /// 开始识别
     pub fn start(&mut self) -> Result<()> {
         let url = self.create_url()?;
-        info!("连接讯飞 WebSocket: {}", url);
+        info!("连接讯飞 WebSocket");
         
         let (audio_tx, audio_rx) = mpsc::channel();
         self.audio_tx = Some(audio_tx);
         
         let is_running = self.is_running.clone();
         let user_stopped = self.user_stopped.clone();
-        let on_result = self.on_result.clone();
+        let on_result = Arc::clone(&self.on_result);
         
         let app_id = self.app_id.clone();
         let language = self.language.clone();
@@ -156,7 +154,6 @@ impl XunfeiStreamer {
             ).await;
         });
         
-        // 等待连接建立
         thread::sleep(Duration::from_millis(500));
         
         Ok(())
@@ -169,18 +166,24 @@ impl XunfeiStreamer {
         accent: String,
         vad_eos: u64,
         audio_rx: Receiver<Vec<u8>>,
-        on_result: Box<dyn Fn(RecognitionResult) + Send>,
+        on_result: Arc<dyn Fn(RecognitionResult) + Send + Sync>,
         is_running: Arc<AtomicBool>,
         user_stopped: Arc<AtomicBool>,
     ) {
         is_running.store(true, Ordering::SeqCst);
         
-        let request = url.into_client_request().unwrap();
+        let request = match url.into_client_request() {
+            Ok(req) => req,
+            Err(e) => {
+                error!("创建 WebSocket 请求失败：{}", e);
+                return;
+            }
+        };
+        
         match connect_async(request).await {
             Ok((mut ws, _)) => {
                 info!("✅ WebSocket 连接成功");
                 
-                // 发送首帧
                 let first_frame = serde_json::json!({
                     "common": {"app_id": app_id},
                     "business": {
@@ -204,10 +207,9 @@ impl XunfeiStreamer {
                     return;
                 }
                 
-                // 音频发送任务
-                let ws_send = ws.split().0;
+                let (mut write, mut read) = ws.split();
+                
                 let audio_task = tokio::spawn(async move {
-                    let mut ws_send = ws_send;
                     while !user_stopped.load(Ordering::SeqCst) {
                         match audio_rx.recv_timeout(Duration::from_millis(100)) {
                             Ok(audio_data) => {
@@ -220,23 +222,20 @@ impl XunfeiStreamer {
                                         "audio": audio_b64,
                                     }
                                 });
-                                let _ = ws_send.send(Message::Text(frame.to_string())).await;
+                                let _ = write.send(Message::Text(frame.to_string())).await;
                             }
                             Err(_) => continue,
                         }
                     }
                     
-                    // 发送结束帧
                     let end_frame = serde_json::json!({
                         "data": {"status": 2, "audio": ""}
                     });
-                    let _ = ws_send.send(Message::Text(end_frame.to_string())).await;
-                    ws_send
+                    let _ = write.send(Message::Text(end_frame.to_string())).await;
                 });
                 
-                // 接收结果
                 while is_running.load(Ordering::SeqCst) {
-                    match ws.next().await {
+                    match read.next().await {
                         Some(Ok(Message::Text(text))) => {
                             if let Ok(resp) = serde_json::from_str::<XunfeiResponse>(&text) {
                                 if resp.code == 0 {

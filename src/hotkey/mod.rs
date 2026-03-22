@@ -1,13 +1,13 @@
 //! 快捷键监听模块 - 使用 evdev 监听全局快捷键
 
-use anyhow::{Context, Result};
-use evdev::{AttributeSet, Device, Key, KeyCode};
-use log::{error, info};
-use std::collections::HashSet;
+use anyhow::Result;
+use evdev::{AttributeSet, Device, Key};
+use log::info;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
+use std::sync::mpsc::{self, Sender};
 
 /// 快捷键事件
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -19,24 +19,24 @@ pub enum HotkeyEvent {
 /// 快捷键监听器
 pub struct HotkeyListener {
     trigger_key: Key,
-    on_event: Box<dyn Fn(HotkeyEvent) + Send + 'static>,
     is_running: Arc<AtomicBool>,
     thread: Option<thread::JoinHandle<()>>,
+    event_tx: Option<Sender<HotkeyEvent>>,
+    event_rx: Option<std::sync::mpsc::Receiver<HotkeyEvent>>,
 }
 
 impl HotkeyListener {
     /// 创建快捷键监听器
-    pub fn new<F>(trigger: &str, on_event: F) -> Result<Self>
-    where
-        F: Fn(HotkeyEvent) + Send + 'static,
-    {
+    pub fn new(trigger: &str) -> Result<Self> {
         let trigger_key = Self::parse_key(trigger)?;
+        let (tx, rx) = mpsc::channel();
         
         Ok(HotkeyListener {
             trigger_key,
-            on_event: Box::new(on_event),
             is_running: Arc::new(AtomicBool::new(false)),
             thread: None,
+            event_tx: Some(tx),
+            event_rx: Some(rx),
         })
     }
     
@@ -58,14 +58,12 @@ impl HotkeyListener {
     fn find_keyboard_devices() -> Vec<Device> {
         let mut devices = Vec::new();
         
-        for device in evdev::enumerate() {
-            let (_, mut dev) = device;
-            if let Ok(keys) = dev.get_supported_keys() {
-                // 检查是否有 Alt 键
-                if keys.contains(Key::KEY_LEFTALT) || keys.contains(Key::KEY_RIGHTALT) {
-                    if let Ok(name) = dev.name() {
+        for (_, device) in evdev::enumerate() {
+            if let Ok(keys) = device.get_supported_keys() {
+                if keys.contains(&Key::KEY_LEFTALT) || keys.contains(&Key::KEY_RIGHTALT) {
+                    if let Ok(name) = device.name() {
                         info!("找到键盘设备：{}", name);
-                        devices.push(dev);
+                        devices.push(device);
                     }
                 }
             }
@@ -88,8 +86,9 @@ impl HotkeyListener {
         info!("监听 {} 个键盘设备", devices.len());
         
         let trigger_key = self.trigger_key;
-        let on_event = self.on_event.clone();
         let is_running = self.is_running.clone();
+        let tx = self.event_tx.take().unwrap();
+        
         is_running.store(true, Ordering::SeqCst);
         
         let handle = thread::spawn(move || {
@@ -97,26 +96,23 @@ impl HotkeyListener {
             let mut hotkey_pressed = false;
             
             while is_running.load(Ordering::SeqCst) {
-                for device in &mut devices.clone() {
+                for device in &mut devices.iter() {
                     if let Ok(events) = device.fetch_events() {
                         for event in events {
+                            let key = Key::new(event.code());
                             if event.value() == 1 {
-                                // 按键按下
-                                pressed_keys.insert(event.code());
+                                pressed_keys.insert(key);
                                 
-                                // 检查快捷键是否被按下
                                 if pressed_keys.contains(trigger_key) && !hotkey_pressed {
                                     hotkey_pressed = true;
-                                    on_event(HotkeyEvent::Pressed);
+                                    let _ = tx.send(HotkeyEvent::Pressed);
                                 }
                             } else if event.value() == 0 {
-                                // 按键释放
-                                pressed_keys.remove(event.code());
+                                pressed_keys.remove(key);
                                 
-                                // 检查快捷键是否被释放
                                 if !pressed_keys.contains(trigger_key) && hotkey_pressed {
                                     hotkey_pressed = false;
-                                    on_event(HotkeyEvent::Released);
+                                    let _ = tx.send(HotkeyEvent::Released);
                                 }
                             }
                         }
@@ -130,6 +126,11 @@ impl HotkeyListener {
         self.thread = Some(handle);
         
         Ok(())
+    }
+    
+    /// 获取事件接收器
+    pub fn get_event_receiver(&mut self) -> Option<std::sync::mpsc::Receiver<HotkeyEvent>> {
+        self.event_rx.take()
     }
     
     /// 停止监听

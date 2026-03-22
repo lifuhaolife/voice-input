@@ -14,6 +14,7 @@ hound = "3.5"
 # WebSocket
 tungstenite = "0.21"
 tokio-tungstenite = "0.21"
+futures-util = "0.3"
 
 # 异步运行时
 tokio = { version = "1", features = ["full"] }

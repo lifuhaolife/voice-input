@@ -2,11 +2,12 @@
 
 use anyhow::{Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{Device, Stream, StreamConfig};
-use log::{debug, error, info};
+use cpal::Device;
+use log::{error, info};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::sync::mpsc::{self, Sender, Receiver};
+use std::thread;
 
 /// 音频数据块
 pub type AudioChunk = Vec<i16>;
@@ -18,8 +19,9 @@ pub struct StreamingRecorder {
     chunk_size: usize,
     tx: Option<Sender<AudioChunk>>,
     rx: Option<Receiver<AudioChunk>>,
-    stream: Option<Stream>,
     is_recording: Arc<AtomicBool>,
+    stop_flag: Arc<AtomicBool>,
+    thread: Option<thread::JoinHandle<()>>,
 }
 
 impl StreamingRecorder {
@@ -34,50 +36,50 @@ impl StreamingRecorder {
             chunk_size,
             tx: Some(tx),
             rx: Some(rx),
-            stream: None,
             is_recording: Arc::new(AtomicBool::new(false)),
+            stop_flag: Arc::new(AtomicBool::new(false)),
+            thread: None,
         }
     }
     
     /// 列出可用的音频输入设备
-    pub fn list_devices() -> Result<Vec<(String, Device)>> {
+    pub fn list_devices() -> Result<Vec<String>> {
         let host = cpal::default_host();
         let devices = host.input_devices()?;
         let mut result = Vec::new();
         
         for device in devices {
             if let Ok(name) = device.name() {
-                result.push((name, device));
+                result.push(name);
             }
         }
         
         Ok(result)
     }
     
-    /// 获取默认输入设备
-    pub fn get_default_device() -> Result<Device> {
-        let host = cpal::default_host();
-        host.default_input_device()
-            .context("未找到默认输入设备")
-    }
-    
     /// 开始录音
-    pub fn start(&mut self, device: Option<Device>) -> Result<()> {
+    pub fn start(&mut self) -> Result<()> {
         if self.is_recording.load(Ordering::SeqCst) {
             return Ok(());
         }
         
-        let device = device.unwrap_or_else(|| Self::get_default_device()?);
+        let host = cpal::default_host();
+        let device = host.default_input_device()
+            .context("未找到默认输入设备")?;
+        
         let config = device.default_input_config()?;
+        let actual_sample_rate = config.sample_rate().0;
         
         info!(
             "开始录音：{}Hz, {} 声道，块大小：{} 采样",
-            self.sample_rate, self.channels, self.chunk_size
+            actual_sample_rate, self.channels, self.chunk_size
         );
         
         let tx = self.tx.take().context("发送器已使用")?;
         let is_recording = self.is_recording.clone();
+        let stop_flag = self.stop_flag.clone();
         is_recording.store(true, Ordering::SeqCst);
+        stop_flag.store(false, Ordering::SeqCst);
         
         let err_fn = |err| error!("音频流错误：{}", err);
         
@@ -109,7 +111,16 @@ impl StreamingRecorder {
         };
         
         stream.play()?;
-        self.stream = Some(stream);
+        
+        // 保存 stream 在线程中
+        let handle = thread::spawn(move || {
+            while !stop_flag.load(Ordering::SeqCst) {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            drop(stream);
+        });
+        
+        self.thread = Some(handle);
         
         Ok(())
     }
@@ -117,9 +128,9 @@ impl StreamingRecorder {
     /// 停止录音
     pub fn stop(&mut self) {
         self.is_recording.store(false, Ordering::SeqCst);
-        if let Some(stream) = self.stream.take() {
-            stream.pause().ok();
-            drop(stream);
+        self.stop_flag.store(true, Ordering::SeqCst);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
         }
         info!("录音已停止");
     }

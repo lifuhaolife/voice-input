@@ -2,12 +2,9 @@
 
 use anyhow::{Context, Result};
 use std::fs::{File, OpenOptions};
-use std::io::{self, Write};
+use std::io::Write;
 use std::path::PathBuf;
 use std::process;
-
-#[cfg(unix)]
-use std::os::unix::io::AsRawFd;
 
 /// 进程锁
 pub struct ProcessLock {
@@ -56,26 +53,6 @@ impl ProcessLock {
             .open(&self.lock_file)
             .with_context(|| format!("无法打开锁文件：{:?}", self.lock_file))?;
         
-        // 尝试获取独占锁（非阻塞）
-        #[cfg(unix)]
-        {
-            use std::os::unix::prelude::*;
-            use libc::{flock, LOCK_EX, LOCK_NB};
-            
-            let flock_struct = flock {
-                l_type: libc::F_WRLCK as i16,
-                l_whence: libc::SEEK_SET as i16,
-                l_start: 0,
-                l_len: 0,
-                l_pid: 0,
-            };
-            
-            let ret = unsafe { flock(file.as_raw_fd(), LOCK_EX | LOCK_NB) };
-            if ret != 0 {
-                return Ok(false);
-            }
-        }
-        
         // 写入 PID
         let mut file = file;
         writeln!(file, "{}", process::id())
@@ -87,16 +64,17 @@ impl ProcessLock {
     }
     
     /// 检查进程是否运行
-    #[cfg(unix)]
     fn is_process_running(&self, pid: u32) -> bool {
-        unsafe {
-            libc::kill(pid as i32, 0) == 0
+        #[cfg(unix)]
+        {
+            unsafe {
+                libc::kill(pid as i32, 0) == 0
+            }
         }
-    }
-    
-    #[cfg(not(unix))]
-    fn is_process_running(&self, _pid: u32) -> bool {
-        false
+        #[cfg(not(unix))]
+        {
+            false
+        }
     }
     
     /// 释放锁
@@ -114,7 +92,7 @@ impl ProcessLock {
         
         if let Ok(content) = std::fs::read_to_string(&lock_file) {
             if let Ok(pid) = content.trim().parse::<u32>() {
-                // 检查进程是否存在
+                #[cfg(unix)]
                 unsafe {
                     if libc::kill(pid as i32, 0) == 0 {
                         return Some(pid);
